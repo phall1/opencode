@@ -458,7 +458,9 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
   )
   yield* Effect.sync(() => {
     if (result.reason !== undefined)
+      // eslint-disable-next-line opentui/no-raw-stdout -- Post-shutdown CLI output after the renderer stopped; no frame to corrupt.
       process.stderr.write((cliErrorMessage(result.reason) ?? errorFormat(result.reason)) + "\n")
+    // eslint-disable-next-line opentui/no-raw-stdout -- Post-shutdown CLI output after the renderer stopped; no frame to corrupt.
     if (result.epilogue) process.stdout.write(result.epilogue + "\n")
   })
 })

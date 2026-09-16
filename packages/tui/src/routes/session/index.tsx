@@ -1242,6 +1242,7 @@ export function Session(props: {
   const terminalHeight = createMemo(() => dimensions().height)
 
   return (
+    // eslint-disable-next-line opentui/no-unknown-elements -- Solid context provider: a component value, not a catalogue tag.
     <context.Provider
       value={{
         get width() {

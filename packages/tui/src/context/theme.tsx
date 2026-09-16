@@ -399,6 +399,7 @@ export function ThemeContextProvider(props: ParentProps<{ context: ContextName |
     return name ? value.themes.currentTokens().contextual[name] : value.current
   }, value.themes.mode)
   return (
+    // eslint-disable-next-line opentui/no-unknown-elements -- Solid context provider: a component value, not a catalogue tag.
     <themeContext.context.Provider value={{ current, themes: value.themes, ready: value.ready }}>
       {props.children}
     </themeContext.context.Provider>
