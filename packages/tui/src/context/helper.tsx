@@ -13,6 +13,7 @@ export function createSimpleContext<T, Props extends Record<string, any>>(input:
       return (
         // @ts-expect-error
         <Show when={init.ready === undefined || init.ready === true}>
+          {/* eslint-disable-next-line opentui/no-unknown-elements -- Solid context provider: a component value, not a catalogue tag. */}
           <ctx.Provider value={init}>{props.children}</ctx.Provider>
         </Show>
       )

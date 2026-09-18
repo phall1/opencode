@@ -209,6 +209,7 @@ const ctx = createContext<ToastContext>()
 
 export function ToastProvider(props: ParentProps) {
   const value = init()
+  // eslint-disable-next-line opentui/no-unknown-elements -- Solid context provider: a component value, not a catalogue tag.
   return <ctx.Provider value={value}>{props.children}</ctx.Provider>
 }
 

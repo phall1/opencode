@@ -48,6 +48,7 @@ export function LocationProvider(props: ParentProps) {
   onCleanup(client.event.on("server.connected", () => sync(ref())))
 
   return (
+    // eslint-disable-next-line opentui/no-unknown-elements -- Solid context provider: a component value, not a catalogue tag.
     <context.Provider
       value={{
         get current() {

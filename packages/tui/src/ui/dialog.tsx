@@ -220,6 +220,7 @@ export function DialogProvider(props: ParentProps) {
     (config.data.terminal?.copy ?? (process.platform === "win32" ? "manual" : "select")) === "select"
 
   return (
+    // eslint-disable-next-line opentui/no-unknown-elements -- Solid context provider: a component value, not a catalogue tag.
     <ctx.Provider value={value}>
       {props.children}
       <box
