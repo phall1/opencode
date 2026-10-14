@@ -48,10 +48,22 @@ Object.defineProperty(FSUtil, "node", {
   ),
 })
 
+const directory = process.argv[2]
+if (process.argv[3] === "repo") {
+  const { demoTask, experiment } = await import("../../src/repo")
+  await Effect.runPromise(experiment(demoTask, `${directory}/repo`, true))
+  const clean = ["checkpoint", "general", "overfit"].every(
+    (name) => !readFileSync(`${directory}/repo/${name}.json`, "utf8").includes(sentinel),
+  )
+  if (!clean || acquisitions === 0 || Object.values(observations).some((count) => count !== 0))
+    throw new Error("Ambient repo fixture observations leaked")
+  console.log(JSON.stringify({ clean, acquisitions, observations }))
+  process.exit(0)
+}
+
 const { record } = await import("../../src/index")
 const { createHost, runPrompt, SESSION_ID, PROMPT } = await import("../../src/runtime")
 const { ToolTape } = await import("../../src/tape")
-const directory = process.argv[2]
 const recorded = await Effect.runPromise(record(`${directory}/capsule.json`))
 mkdirSync(`${directory}/missing`)
 const missing = await Effect.runPromise(

@@ -1,6 +1,7 @@
 import { Auth, LanguageModel } from "@opencode/ai"
 import { OpenAIChat } from "@opencode/ai/protocols"
 import { Config } from "@opencode/core/config"
+import { ConfigPluginSource } from "@opencode/core/config/plugin/source"
 import { EnvironmentMemory } from "@opencode/core/environment/memory"
 import { Environment } from "@opencode/core/environment/index"
 import { InstructionBuiltIns } from "@opencode/core/instructions/builtins"
@@ -28,19 +29,30 @@ import { SimulationOpenAI } from "@opencode/simulation/backend/openai"
 import { SimulatedProvider } from "@opencode/simulation/backend/simulated-provider"
 import { httpClient } from "@opencode/util/effect/app-node-platform"
 import { FSUtil } from "@opencode/util/fs-util"
+import { Global } from "@opencode/util/global"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
+import { ChildProcessSpawner, make } from "effect/process/ChildProcessSpawner"
+import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs"
 import path from "node:path"
-import os from "node:os"
 import { Files, NativeExport, ToolEntry, encode, hash, parseJson } from "./archive"
 import { ToolTape } from "./tape"
 import { boundedFileSystemNode } from "./filesystem"
+import { temporary } from "./scratch"
+export { temporary } from "./scratch"
 
 export const INSTRUCTIONS =
   "Bounded public text repair fixture. Use only read and write on /fixture/repair.txt. No processes or network tools."
 export const PROMPT = "Read /fixture/repair.txt and repair teh to the."
 export const INITIAL = { "/fixture/repair.txt": "teh small fixture\n" }
+export interface HostProfile {
+  instructions: string
+  steps: number
+  requests: number
+  responses: readonly (readonly SimulatedProvider.ProviderResponseEvent[])[]
+  world?: Environment.Driver
+}
 export interface Counters {
   provider: number
   http: number
@@ -66,6 +78,10 @@ const SOURCES = [
   "packages/core/src/tool/plugin/write.ts",
   "packages/core/src/environment/memory.ts",
   "packages/core/src/config.ts",
+  "packages/core/src/config/plugin/source.ts",
+  "packages/core/src/plugin/internal.ts",
+  "packages/core/src/plugin/supervisor.ts",
+  "packages/util/src/cross-spawn-spawner.ts",
   "packages/core/src/permission.ts",
   "packages/ai/src/protocols/openai-chat.ts",
   "packages/ai/src/route/executor.ts",
@@ -89,11 +105,6 @@ export const sourcePins = () => {
     "resolved/effect/package.json": hash(resolved),
   }
 }
-export const temporary = () => {
-  const directory = path.join(os.tmpdir(), "opencode")
-  mkdirSync(directory, { recursive: true })
-  return mkdtempSync(path.join(directory, "bounded-replay-"))
-}
 
 export const withScratch = <A, E, R>(use: (directory: string) => Effect.Effect<A, E, R>) =>
   Effect.acquireRelease(Effect.sync(temporary), (directory) =>
@@ -110,7 +121,7 @@ export const makeWorld = Effect.fn("Replay.makeWorld")(function* (files: typeof 
   return driver
 })
 
-export const snapshotWorld = Effect.fn("Replay.snapshotWorld")(function* (driver: EnvironmentMemory.MemoryDriver) {
+export const snapshotWorld = Effect.fn("Replay.snapshotWorld")(function* (driver: Environment.Driver) {
   const tree = Environment.makeFiles(driver)
   const walk = (directory: string): Effect.Effect<readonly (readonly [string, string])[], unknown> =>
     Effect.gen(function* () {
@@ -158,7 +169,7 @@ export function fixtureProvider(counters: { provider: number }, continuation = f
   }
 }
 
-function toolResponse(
+export function toolResponse(
   id: string,
   name: string,
   input: Schema.Json,
@@ -168,14 +179,14 @@ function toolResponse(
     { type: "finish", reason: "tool-calls" },
   ]
 }
-function textResponse(text: string): readonly SimulatedProvider.ProviderResponseEvent[] {
+export function textResponse(text: string): readonly SimulatedProvider.ProviderResponseEvent[] {
   return [
     { type: "textDelta", text },
     { type: "finish", reason: "stop" },
   ]
 }
 
-export function boundedPlugin(tape: () => ToolTape) {
+export function boundedPlugin(tape: () => ToolTape, profile?: HostProfile) {
   return Plugin.define({
     id: "bounded-replay",
     effect: (ctx) =>
@@ -183,8 +194,8 @@ export function boundedPlugin(tape: () => ToolTape) {
         yield* ctx.agent.transform((editor) => {
           editor.list().forEach((agent) => editor.remove(agent.id))
           editor.update(Agent.ID.make("fixture"), (agent) => {
-            agent.system = INSTRUCTIONS
-            agent.steps = 4
+            agent.system = profile?.instructions ?? INSTRUCTIONS
+            agent.steps = profile?.steps ?? 4
             agent.permissions = [
               { action: "*", resource: "*", effect: "deny" },
               { action: "read", resource: "*", effect: "allow" },
@@ -226,9 +237,11 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
   tape: ToolTape
   files: typeof Files.Type
   counters: Counters
+  profile?: HostProfile
+  globalDirectory?: string
 }) {
-  const world = yield* makeWorld(options.files)
-  const worlds = new Map<Workspace.ID, EnvironmentMemory.MemoryDriver>()
+  const world = options.profile?.world ?? (yield* makeWorld(options.files))
+  const worlds = new Map<Workspace.ID, Environment.Driver>()
   const driver = WorkspaceDriver.make({
     create: ({ workspaceID }) => Effect.succeed({ binding: { externalID: workspaceID } }),
     connect: ({ workspaceID }) => {
@@ -240,7 +253,7 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
   })
   const network =
     options.tape.mode === "record"
-      ? SimulationNetwork.layer([SimulationOpenAI.route(fixtureProvider(options.counters))])
+      ? SimulationNetwork.layer([SimulationOpenAI.route(scriptedProvider(options.counters, options.profile))])
       : SimulationNetwork.layer()
   const transport = HttpRecorder.layer("provider", {
     mode: options.tape.mode,
@@ -257,7 +270,7 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
     HttpClient.make((request) =>
       Effect.suspend(() => {
         state.counters.http++
-        if (state.counters.http > 8) return Effect.die("HTTP budget exceeded")
+        if (state.counters.http > (options.profile?.requests ?? 8)) return Effect.die("HTTP budget exceeded")
         return state.client.execute(request).pipe(
           Effect.tapError((error) =>
             Effect.sync(() => {
@@ -279,7 +292,7 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
   const pinned = Instructions.make({
     key: Instructions.Key.make("replay/pinned"),
     codec: Schema.toCodecJson(Schema.String),
-    read: Effect.succeed(INSTRUCTIONS),
+    read: Effect.succeed(options.profile?.instructions ?? INSTRUCTIONS),
     render: { initial: (value) => value, changed: (_before, value) => value },
   })
   const opencode = yield* OpenCode.create(
@@ -288,11 +301,32 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
       fs: { filewatcher: false },
       events: { persist: true },
       workspaceProviders: { replay: driver },
-      plugins: [boundedPlugin(() => state.tape)],
+      plugins: [boundedPlugin(() => state.tape, options.profile)],
     },
     {
       overrides: [
+        Global.node.replace(Global.layerWith(scratchGlobal(options.globalDirectory ?? options.directory))),
+        CrossSpawnSpawner.node.replace(
+          Layer.succeed(
+            ChildProcessSpawner,
+            make(() => Effect.die("Host processes are unsupported in replay profiles")),
+          ),
+        ),
         Config.node.replace(Config.testLayer()),
+        ConfigPluginSource.node.replace(
+          Layer.succeed(ConfigPluginSource.Service, {
+            // Native supervisor keeps guarded policy/Console plugins. Only the
+            // required native leaves and fixture transform are otherwise activated.
+            operations: () =>
+              Effect.succeed([
+                { type: "remove" as const, target: "*" },
+                ...["opencode.tool.read", "opencode.tool.write", "opencode.prompt.identity", "bounded-replay"].map(
+                  (target) => ({ type: "add" as const, target, options: {} }),
+                ),
+              ]),
+            changes: () => Stream.never,
+          }),
+        ),
         FSUtil.node.replace(boundedFileSystemNode()),
         SessionInstructions.node.replace(Layer.succeed(SessionInstructions.Service, { load: () => Effect.void })),
         httpClient.replace(counted),
@@ -323,7 +357,7 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
       ],
     },
   )
-  const attach = Effect.fn("Replay.attachWorld")(function* (driver: EnvironmentMemory.MemoryDriver) {
+  const attach = Effect.fn("Replay.attachWorld")(function* (driver: Environment.Driver) {
     const workspaceID = yield* opencode.workspace.create({ provider: "replay" })
     worlds.set(workspaceID, driver)
     return Location.Ref.make({ directory: AbsolutePath.make("/"), workspaceID })
@@ -332,16 +366,17 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
   const beginTrajectory = Effect.fn("Replay.beginTrajectory")(function* (
     directory: string,
     expected?: readonly ToolEntry[],
+    profile?: HostProfile,
   ) {
     const counters: Counters = { provider: 0, http: 0, failures: [] }
-    const tape = new ToolTape(expected ? "replay" : "record", directory, expected)
+    const tape = new ToolTape(expected ? "replay" : "record", directory, expected, options.tape.rules)
     const client = Context.get(
       yield* Layer.build(
         HttpRecorder.layer("provider", { mode: tape.mode, directory, match: strictMatch }).pipe(
           Layer.provide(
             expected
               ? SimulationNetwork.layer()
-              : SimulationNetwork.layer([SimulationOpenAI.route(fixtureProvider(counters, true))]),
+              : SimulationNetwork.layer([SimulationOpenAI.route(scriptedProvider(counters, profile, true))]),
           ),
         ),
       ),
@@ -352,6 +387,40 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
   })
   return { opencode, world, attach, location, beginTrajectory }
 })
+
+function scriptedProvider(
+  counters: Counters,
+  profile?: HostProfile,
+  continuation = false,
+): SimulatedProvider.Interface {
+  if (!profile) return fixtureProvider(counters, continuation)
+  return {
+    stream: () =>
+      Stream.suspend(() => {
+        const response = profile.responses[counters.provider++]
+        if (!response)
+          return Stream.fail(
+            new SimulatedProvider.ProviderDisconnectedError({ message: "Scripted response budget exhausted" }),
+          )
+        return Stream.fromIterable(response)
+      }),
+  }
+}
+
+function scratchGlobal(directory: string) {
+  const root = path.join(directory, "global")
+  return {
+    home: path.join(root, "home"),
+    data: path.join(root, "data"),
+    cache: path.join(root, "cache"),
+    config: path.join(root, "config"),
+    state: path.join(root, "state"),
+    tmp: path.join(root, "tmp"),
+    bin: path.join(root, "bin"),
+    log: path.join(root, "log"),
+    repos: path.join(root, "repos"),
+  }
+}
 
 export const runPrompt = Effect.fn("Replay.runPrompt")(function* (
   opencode: OpenCode.Interface,

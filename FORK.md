@@ -27,6 +27,7 @@ bun install --frozen-lockfile --ignore-scripts
 bun run check
 bun run replay:test
 bun run replay:demo
+bun run replay:repo
 ```
 
 The explicit archive commands run through the same entrypoint:
@@ -91,6 +92,34 @@ restore independent worlds and produce self-contained child capsules, retaining
 their parent evidence. The same replay and measurement commands accept children;
 lineages are bounded to four forks and archives to 8 MiB. Nothing snapshots OS
 processes, databases, remote services, or hidden model state.
+
+The repository experiment extends one capability at a time: declared source
+files on disposable disk, a settled assessment checkpoint before the repair, two
+scripted continuations, and independent Bun test verification of frozen results.
+Agent tools remain bounded native reads/writes; there is no unrestricted shell
+tool, replacement reasoning loop, live-model sampler, or training optimizer.
+Execution success and independently verified task success are different facts.
+
+Custom local executable fixtures require explicit trust acknowledgement. Clean
+environment variables and fixed command arguments do not provide OS containment.
+Untrusted or live-policy-produced code, a cyber range, and RL experiments remain
+expansion gates until containment and trustworthy reward checks are verified.
+An action with no committed receipt is unknown, not permission to retry it.
+
+### Readiness is capability-specific
+
+| Capability                       | Required evidence before expansion                                                                                                       |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Trusted scripted repo experiment | Baseline and negative controls, independent verification, isolated checkpoints, complete cold replay, immutable evidence                 |
+| Custom local code                | Explicit executable-code acknowledgement; no trust inferred from an ID or self-signed capsule digest                                     |
+| Untrusted or live-policy code    | Tested filesystem/network/process containment and verifier integrity, failing closed when containment is unavailable                     |
+| Live model comparison            | Separate provider/spending approval, recorded effective policy, comparable task/checkpoint identity, honest usage/cost accounting        |
+| Cyber-range task                 | Isolated resettable range adapter, denied production access, independent verifier, declared state coverage                               |
+| RL/training                      | Trustworthy rollouts/rewards, scenario-level data splits, explicit truncation/failure semantics; sibling forks are not independent tasks |
+
+Being ready for the first row does not establish any of the later rows. Portable
+reports may link immutable capsules into phux/ops; their bounded telemetry is not
+a substitute for episode evidence.
 
 ### Baseline verification
 

@@ -2,7 +2,7 @@ import { Effect, Schema, type Scope } from "effect"
 import { readFileSync } from "node:fs"
 import { Agent } from "@opencode/schema/agent"
 import { Session } from "@opencode/schema/session"
-import { EnvironmentMemory } from "@opencode/core/environment/memory"
+import { Environment } from "@opencode/core/environment/index"
 import {
   Capsule,
   MAX_ANCESTRY,
@@ -137,7 +137,7 @@ const HttpTape = Schema.Struct({ interactions: Schema.Array(Schema.Unknown) })
 type Host = Effect.Success<ReturnType<typeof createHost>>
 type Restored = {
   host: Host
-  world: EnvironmentMemory.MemoryDriver
+  world: Environment.Driver
   sessionID: Session.ID
   context: typeof NativeExport.Type
   counters: Counters
@@ -148,7 +148,7 @@ type Restored = {
 const forkWorld = Effect.fn("Replay.forkWorld")(function* (
   host: Host,
   sessionID: Session.ID,
-  world: EnvironmentMemory.MemoryDriver,
+  world: Environment.Driver,
 ) {
   const child = yield* host.opencode.sessions.fork({ sessionID })
   const location = yield* host.attach(world)

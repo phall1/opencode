@@ -7,7 +7,7 @@ const fixture = (value: string) => {
   return resolved === "/fixture" || resolved.startsWith("/fixture/")
 }
 
-/** Keep host bookkeeping, but remove host observations of the model's memory world. */
+/** Keep host bookkeeping, but remove host observations of virtual fixture paths. */
 export function boundedFileSystem(fs: FSUtil.Interface): FSUtil.Interface {
   const denied = (value: string, method: string) =>
     Effect.fail(
@@ -16,7 +16,7 @@ export function boundedFileSystem(fs: FSUtil.Interface): FSUtil.Interface {
         module: "ReplayFS",
         method,
         pathOrDescriptor: value,
-        description: "Fixture files exist only in the memory world",
+        description: "Fixture paths exist only through their isolated Environment world",
       }),
     )
   return {
