@@ -93,9 +93,39 @@ export const fileSystem = (
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const directory = options.directory ?? DEFAULT_RECORDINGS_DIR
-      const recorded = new Map<string, { interactions: Interaction[]; findings: SecretFinding[] }>()
+      const recorded = new Map<
+        string,
+        {
+          interactions: ReadonlyArray<Interaction>
+          findings: ReadonlyArray<SecretFinding>
+          metadata?: CassetteMetadata
+        }
+      >()
       const appendLock = yield* Semaphore.make(1)
       const pathFor = (name: string) => cassettePath(directory, name)
+      const previousCassette = (name: string) =>
+        fs.readFileString(pathFor(name)).pipe(
+          Effect.catchIf(
+            (error) => error.reason._tag === "NotFound",
+            () => Effect.succeed(undefined),
+          ),
+          Effect.flatMap((raw) =>
+            raw === undefined
+              ? Effect.succeed({
+                  interactions: [] as ReadonlyArray<Interaction>,
+                  findings: [] as ReadonlyArray<SecretFinding>,
+                  metadata: undefined,
+                })
+              : Effect.try({ try: () => parseCassette(raw), catch: (error) => invalidCassette(name, error) }).pipe(
+                  Effect.map((cassette) => ({
+                    interactions: cassette.interactions,
+                    findings: secretFindings(cassette.interactions),
+                    metadata: cassette.metadata,
+                  })),
+                ),
+          ),
+          Effect.orDie,
+        )
       const walk = (current: string): Effect.Effect<ReadonlyArray<string>> =>
         Effect.gen(function* () {
           const entries = yield* fs.readDirectory(current).pipe(Effect.orElseSucceed(() => [] as string[]))
@@ -127,10 +157,10 @@ export const fileSystem = (
         append: (name, interaction, metadata) =>
           appendLock.withPermit(
             Effect.gen(function* () {
-              const entry = recorded.get(name) ?? { interactions: [], findings: [] }
+              const entry = recorded.get(name) ?? (yield* previousCassette(name))
               const interactions = [...entry.interactions, interaction]
               const interactionFindings = [...entry.findings, ...secretFindings(interaction)]
-              const cassette = buildCassette(name, interactions, metadata)
+              const cassette = buildCassette(name, interactions, { ...entry.metadata, ...metadata })
               const findings = [...interactionFindings, ...secretFindings(cassette.metadata ?? {})]
               yield* failIfUnsafe(name, findings)
               const target = pathFor(name)
@@ -141,7 +171,7 @@ export const fileSystem = (
                 Effect.ensuring(fs.remove(temporary, { force: true }).pipe(Effect.catch(() => Effect.void))),
                 Effect.orDie,
               )
-              recorded.set(name, { interactions, findings: interactionFindings })
+              recorded.set(name, { interactions, findings: interactionFindings, metadata: cassette.metadata })
             }),
           ),
         exists: (name) => fs.exists(pathFor(name)).pipe(Effect.orElseSucceed(() => false)),

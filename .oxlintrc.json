@@ -24,6 +24,12 @@
   },
   "overrides": [
     {
+      "files": ["packages/replay/**"],
+      "rules": {
+        "complexity": ["error", 10]
+      }
+    },
+    {
       "files": [
         "packages/app/**",
         "packages/desktop/**",

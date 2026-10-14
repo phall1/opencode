@@ -78,6 +78,21 @@ flowchart TD
 
 Application code does not need to know whether a response is live or replayed.
 
+For execution capsules, select HTTP behavior explicitly rather than depending on
+the process's `CI` environment:
+
+```ts
+HttpRecorder.layer("episode/model", { directory: archive, mode: "record" })
+HttpRecorder.layer("episode/model", { directory: archive, mode: "replay" })
+```
+
+`replay` never delegates to the live HTTP client, including when the cassette is
+missing or a request does not match. `record` explicitly delegates and appends
+interactions even if a cassette exists or `CI=true`; use a new archive directory
+for an immutable episode. `passthrough` delegates without recording. Omitted
+`mode` (or `auto`) preserves the existing cassette/CI-based policy. Explicit modes
+apply to HTTP layers only; socket layers retain their existing automatic policy.
+
 ## API
 
 ```ts
@@ -214,13 +229,14 @@ HttpRecorder.layerFetch("events/create", {
 
 ```ts
 interface RecorderOptions {
+  readonly mode?: "auto" | "record" | "replay" | "passthrough"
   readonly directory?: string
   readonly metadata?: Readonly<Record<string, JsonValue>>
   readonly redact?: RedactOptions
   readonly match?: RequestMatcher
 }
 
-type SocketRecorderOptions = Omit<RecorderOptions, "match">
+type SocketRecorderOptions = Omit<RecorderOptions, "match" | "mode">
 ```
 
 `directory` defaults to `<cwd>/test/fixtures/recordings`.

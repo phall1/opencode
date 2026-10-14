@@ -1,0 +1,48 @@
+name: replay-native
+
+on:
+  pull_request:
+    branches: [v2]
+  push:
+    branches: [v2, replay-native]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replay-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    if: github.repository == 'phall1/opencode'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Install pinned dependencies without lifecycle scripts
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Lint and typecheck
+        run: bun run check
+      - name: HTTP recorder regression tests
+        working-directory: packages/http-recorder
+        run: bun test --timeout 30000 --only-failures
+      - name: Native replay acceptance tests
+        run: bun run replay:test
+      - name: Simulation transport regression tests
+        working-directory: packages/simulation
+        run: bun test --timeout 30000 --only-failures
+      - name: Existing recorded native runner regression
+        working-directory: packages/core
+        run: bun test test/session-runner-recorded.test.ts --timeout 60000 --only-failures
+      - name: Model-free replay demo
+        run: bun run replay:demo

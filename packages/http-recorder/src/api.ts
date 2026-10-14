@@ -34,6 +34,8 @@ export interface RedactOptions {
 
 /** Options shared by HTTP recorder layers. */
 export interface RecorderOptions {
+  /** Explicit HTTP behavior; auto retains the existing cassette/CI-based policy. */
+  readonly mode?: "auto" | "record" | "replay" | "passthrough"
   readonly directory?: string
   readonly metadata?: CassetteMetadata
   readonly redact?: RedactOptions
@@ -41,6 +43,6 @@ export interface RecorderOptions {
 }
 
 /** Recorder configuration for Effect socket and WebSocket layers. */
-export type SocketRecorderOptions = Omit<RecorderOptions, "match">
+export type SocketRecorderOptions = Omit<RecorderOptions, "match" | "mode">
 
 export * as Api from "./api.js"
