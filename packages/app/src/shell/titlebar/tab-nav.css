@@ -9,7 +9,8 @@
   justify-content: center;
 }
 
-[data-titlebar-tab] {
+[data-titlebar-tab],
+[data-titlebar-tab-action] {
   --tab-base: var(--v2-background-bg-deep);
   --tab-overlay: transparent;
   background: linear-gradient(var(--tab-overlay), var(--tab-overlay)), var(--tab-base);
@@ -61,12 +62,18 @@
     :hover,
     :has(> [data-slot="tab-link"]:focus-visible)
   ):not([data-state="pressed"]):not([data-dragging="true"]):not([data-editing="true"]) {
-  --tab-base: var(--v2-background-bg-layer-02);
   --tab-overlay: var(--v2-overlay-simple-overlay-hover);
 }
 
 [data-titlebar-tab]:is([data-state="pressed"], [data-dragging="true"], [data-editing="true"]) {
-  --tab-base: var(--v2-background-bg-layer-02);
+  --tab-overlay: var(--v2-overlay-simple-overlay-pressed);
+}
+
+[data-titlebar-tab-action]:is(:hover, :focus-visible) {
+  --tab-overlay: var(--v2-overlay-simple-overlay-hover);
+}
+
+[data-titlebar-tab-action]:is(:active, [data-state="pressed"]) {
   --tab-overlay: var(--v2-overlay-simple-overlay-pressed);
 }
 
@@ -218,22 +225,30 @@
   }
 }
 
-@container (max-width: 64px) {
+@container (44px < width <= 64px) {
+  [data-titlebar-tab]:not([data-orientation="vertical"]):not([data-editing="true"]):is(:hover, [data-active="true"])
+    [data-slot="tab-link"] {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  [data-titlebar-tab]:not([data-orientation="vertical"]):not([data-editing="true"]):is(:hover, [data-active="true"])
+    [data-titlebar-tab-title] {
+    visibility: hidden;
+  }
+}
+
+@container (max-width: 44px) {
   [data-titlebar-tab]:not([data-orientation="vertical"]) [data-titlebar-tab-link] {
     justify-content: center;
     gap: 0;
     padding-inline: 0;
   }
 
-  @media (hover: none) {
-    [data-titlebar-tab]:not([data-orientation="vertical"]):not([data-editing="true"]) [data-slot="tab-link"],
-    [data-titlebar-tab][data-title-overflow="true"]:not([data-orientation="vertical"]):not([data-editing="true"]):dir(
-        rtl
-      )
-      [data-slot="tab-link"] {
-      -webkit-mask-image: none;
-      mask-image: none;
-    }
+  [data-titlebar-tab]:not([data-orientation="vertical"]):not([data-editing="true"]) [data-slot="tab-link"],
+  [data-titlebar-tab]:not([data-orientation="vertical"]):not([data-editing="true"]):dir(rtl) [data-slot="tab-link"] {
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 
   [data-titlebar-tab]:not([data-orientation="vertical"]) [data-titlebar-tab-title] {
@@ -244,9 +259,43 @@
     display: none;
   }
 
+  @media (hover: hover) {
+    [data-titlebar-tab]:not([data-orientation="vertical"]):not(:hover):not(:has(:focus-visible))
+      [data-slot="tab-close"] {
+      display: none;
+    }
+  }
+
   [data-titlebar-tab]:not([data-orientation="vertical"]) [data-slot="tab-close"] {
     right: auto;
     left: 50%;
     transform: translateX(-50%);
+  }
+}
+
+/* A prompt that arrives in a background tab rings it once, like the TUI's prompt pulse. */
+[data-titlebar-tab] [data-slot="tab-prompt-pulse"] {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 0 1px var(--v2-border-border-strong);
+  animation: tab-prompt-pulse 900ms ease-out;
+}
+
+@keyframes tab-prompt-pulse {
+  20% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-titlebar-tab] [data-slot="tab-prompt-pulse"] {
+    animation: none;
   }
 }

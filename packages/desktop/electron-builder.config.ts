@@ -8,13 +8,18 @@ import type { CustomMacSignOptions } from "app-builder-lib"
 import type { Configuration } from "electron-builder"
 
 const execFileAsync = promisify(execFile)
+
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
+
 const rootDir = path.resolve(packageDir, "../..")
+
 const signScript = path.join(rootDir, "script", "sign-windows.ps1")
+
 // The Electron 42 packaging update briefly installed Linux launchers/icons under
 // "opencode-desktop". Keep that hidden desktop entry around so existing GNOME/KDE
 // pins still resolve after the canonical app id changes back to ai.opencode.desktop.
 const legacyDesktopEntry = path.join(packageDir, "resources", "linux", "opencode-desktop.desktop")
+
 const legacyDesktopEntryFpm = `${legacyDesktopEntry}=/usr/share/applications/opencode-desktop.desktop`
 
 const metainfoFpm = (appId: string) =>
@@ -22,21 +27,24 @@ const metainfoFpm = (appId: string) =>
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
+
   if (process.env.GITHUB_ACTIONS !== "true") return
 
   await execFileAsync(
     "pwsh",
     ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", signScript, configuration.path],
-    { cwd: rootDir },
+    { cwd: rootDir, windowsHide: true },
   )
 }
 
-export function macSignOptions(options: CustomMacSignOptions): CustomMacSignOptions {
+function macSignOptions(options: CustomMacSignOptions): CustomMacSignOptions {
   return {
     ...options,
     optionsForFile: (file) => {
       const defaults = options.optionsForFile?.(file)
+
       if (file !== path.join(options.app, "Contents/Resources/opencode-cli")) return defaults ?? {}
+
       // The Bun CLI loads bun-pty's native library; Electron and its helpers do not need this exception.
       return { ...defaults, entitlements: path.join(packageDir, "resources/entitlements.cli.plist") }
     },
@@ -45,8 +53,11 @@ export function macSignOptions(options: CustomMacSignOptions): CustomMacSignOpti
 
 const channel = (() => {
   const raw = process.env.OPENCODE_CHANNEL
+
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
+
   if (raw === "latest") return "prod"
+
   return "dev"
 })()
 
@@ -77,11 +88,14 @@ const getBase = (appId: string): Configuration => ({
     // Log export imports Zip.js as ESM. Keep index.js and lib, including its inline worker.
     "!**/node_modules/@zip.js/zip.js/dist{,/**/*}",
     "!**/node_modules/@zip.js/zip.js/{index.cjs,index.min.js,index-fflate.js,deno.json,eslint.config.mjs}",
-    // These packages execute compiled JavaScript, not their sources or source maps.
-    "!**/node_modules/{electron-updater,builder-util-runtime,lazy-val}/out/**/*.js.map",
+    // Nothing executes type declarations or source maps, and every entry costs startup time: the
+    // main process parses the whole asar header before it runs any JavaScript.
+    "!**/node_modules/**/*.d.{ts,cts,mts}",
+    "!**/node_modules/**/*.d.{ts,cts,mts}.map",
+    "!**/node_modules/**/*.{js,cjs,mjs}.map",
+    // These packages execute compiled JavaScript, not their sources.
     "!**/node_modules/ajv/lib{,/**/*}",
     "!**/node_modules/ajv-formats/src{,/**/*}",
-    "!**/node_modules/{ajv,ajv-formats}/dist/**/*.js.map",
     // Keep js-yaml's CommonJS sources and dist/js-yaml.mjs ESM entry, not browser bundles or its CLI.
     "!**/node_modules/js-yaml/dist/{js-yaml.js,js-yaml.min.js,*.map}",
     "!**/node_modules/js-yaml/bin{,/**/*}",
@@ -90,7 +104,7 @@ const getBase = (appId: string): Configuration => ({
     {
       from: "resources/",
       to: "",
-      filter: ["opencode-cli", "opencode-cli.exe"],
+      filter: ["opencode-cli", "opencode-cli.exe", "opencode-cli.version"],
     },
   ],
   afterPack: async (context) => {
@@ -98,12 +112,20 @@ const getBase = (appId: string): Configuration => ({
       context.packager.getResourcesDir(context.appOutDir),
       context.electronPlatformName === "win32" ? "opencode-cli.exe" : "opencode-cli",
     )
+
     const file = await stat(cli)
+
     if (!file.isFile() || file.size === 0) throw new Error(`Bundled CLI must be a non-empty file: ${cli}`)
+    const version = path.join(path.dirname(cli), "opencode-cli.version")
+
+    if ((await stat(version)).size === 0) throw new Error(`Bundled CLI version must be a non-empty file: ${version}`)
   },
   mac: {
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.icns`,
+    extendInfo: {
+      NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac: true,
+    },
     hardenedRuntime: true,
     gatekeeperAssess: false,
     entitlements: "resources/entitlements.plist",
@@ -114,9 +136,6 @@ const getBase = (appId: string): Configuration => ({
     },
     notarize: true,
     target: ["dmg", "zip"],
-  },
-  dmg: {
-    sign: true,
   },
   protocols: {
     name: "OpenCode",
@@ -166,6 +185,7 @@ function getConfig() {
         rpm: { packageName: "opencode-dev", fpm: [metainfoFpm(appId)] },
       }
     }
+
     case "beta": {
       return {
         ...base,
@@ -181,6 +201,7 @@ function getConfig() {
         rpm: { packageName: "opencode-beta", fpm: [metainfoFpm(appId)] },
       }
     }
+
     case "prod": {
       return {
         ...base,

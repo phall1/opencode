@@ -65,12 +65,13 @@ export function Home() {
     untrack(() => composer.set(prompt))
   })
 
-  // Wait for the model store to be ready before auto-submitting --prompt.
+  // Wait for everything submit needs before auto-submitting --prompt; it runs once.
   createEffect(() => {
     const r = ref()
     if (sent) return
     if (!r) return
-    if (!local.model.ready) return
+    if (!local.model.ready || !local.model.catalogReady) return
+    if (!local.agent.current() || !local.model.current()) return
     if (!args.prompt) return
     if (r.current.text !== args.prompt) return
     sent = true
@@ -126,7 +127,7 @@ function UpdateNotification(props: { width: number }) {
   const exit = useExit()
   const theme = useTheme()
   const [hovered, setHovered] = createSignal(false)
-  const backdrop = () => (hovered() ? theme.background.action.primary.hovered : theme.background.default)
+  const backdrop = () => (hovered() ? theme.background.action.primary.hovered : theme.background.base)
   createEffect(() => {
     update.notification()
     setHovered(false)
@@ -154,7 +155,7 @@ function UpdateNotification(props: { width: number }) {
                 update.open?.("notification")
               }}
             >
-              <FadeInText fg={theme.text.subdued} backdrop={backdrop()}>
+              <FadeInText fg={theme.text.muted} backdrop={backdrop()}>
                 <Show when={!remote}>
                   <span style={{ fg: theme.text.action.primary.selected }}>
                     {state.type === "installed" ? "/exit" : "/update"}

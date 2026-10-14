@@ -4,8 +4,9 @@ import { createServer } from "node:http"
 import path from "node:path"
 import { Agent } from "@opencode/schema/agent"
 import { Integration } from "@opencode/schema/integration"
-import { ServerStatus } from "@opencode/protocol/groups/server"
+import { ServerInfo } from "@opencode/protocol/groups/server"
 import { Effect, Schedule, Schema } from "effect"
+import { Session } from "@opencode/schema/session"
 import { tmpdir } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { ServerFetch } from "../src/fetch"
@@ -17,6 +18,60 @@ const options = {
   models: { fetch: false },
   fs: { filewatcher: false },
 } as const
+
+it.live("returns LocationNotFoundError for a missing folder and recovers once it exists", () =>
+  Effect.gen(function* () {
+    const config = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-directory-errors-")))
+    const directory = path.join(config.path, "project")
+    const handler = yield* ServerFetch.make({ ...options, config: { directory: config.path } })
+    // Session creation only resolves its placement; it does not boot the Location graph.
+    const created = yield* Effect.promise(() =>
+      handler(
+        new Request("http://opencode.local/api/session", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-opencode-directory": encodeURIComponent(directory) },
+          body: JSON.stringify({ location: { directory } }),
+        }),
+      ),
+    )
+    expect(created.status).toBe(200)
+    const session = Schema.decodeUnknownSync(Schema.Struct({ data: Session.Info }))(
+      yield* Effect.promise(() => created.json()),
+    ).data
+    const endpoints = [
+      "/api/model",
+      "/api/integration",
+      `/api/session/${session.id}/permission`,
+      `/api/experimental/session/${session.id}/instructions/entries`,
+      `/api/session/${session.id}/form`,
+      "/api/session/global/form",
+    ]
+    for (const endpoint of endpoints) {
+      const response = yield* Effect.promise(() =>
+        handler(
+          new Request(`http://opencode.local${endpoint}`, {
+            headers: { "x-opencode-directory": encodeURIComponent(directory) },
+          }),
+        ),
+      )
+      expect({ endpoint, status: response.status }).toEqual({ endpoint, status: 404 })
+      expect(yield* Effect.promise(() => response.json())).toEqual({
+        _tag: "LocationNotFoundError",
+        location: { directory },
+        message: `Location not found: ${directory}`,
+      })
+    }
+    yield* Effect.promise(() => fs.mkdir(directory))
+    const recovered = yield* Effect.promise(() =>
+      handler(
+        new Request("http://opencode.local/api/model", {
+          headers: { "x-opencode-directory": encodeURIComponent(directory) },
+        }),
+      ),
+    )
+    expect(recovered.status).toBe(200)
+  }),
+)
 
 type Handler = (request: Request) => Promise<Response>
 
@@ -94,19 +149,23 @@ it.live("serves the HttpApi and enforces Basic auth like the Node server", () =>
   Effect.gen(function* () {
     const handler = yield* ServerFetch.make({ ...options, password: "secret" })
 
-    const denied = yield* Effect.promise(() => handler(new Request("http://opencode.local/api/status")))
+    const denied = yield* Effect.promise(() => handler(new Request("http://opencode.local/api/info")))
     expect(denied.status).toBe(401)
 
     const response = yield* Effect.promise(() =>
       handler(
-        new Request("http://opencode.local/api/status", {
+        new Request("http://opencode.local/api/info", {
           headers: { authorization: `Basic ${btoa("opencode:secret")}` },
         }),
       ),
     )
     expect(response.status).toBe(200)
-    const body = yield* Effect.promise(() => response.json()).pipe(Effect.flatMap(Schema.decodeUnknownEffect(ServerStatus)))
+    const body = yield* Effect.promise(() => response.json()).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(ServerInfo)),
+    )
     expect(body.version).toBe("test-version")
+    expect(body.paths.tmp).toEndWith("opencode")
+    expect(body.capabilities?.persistentPty).toBe(process.platform !== "win32")
   }),
 )
 
@@ -124,12 +183,12 @@ it.live("serves unauthenticated and answers CORS preflight when no password is c
   Effect.gen(function* () {
     const handler = yield* ServerFetch.make(options)
 
-    const response = yield* Effect.promise(() => handler(new Request("http://opencode.local/api/status")))
+    const response = yield* Effect.promise(() => handler(new Request("http://opencode.local/api/info")))
     expect(response.status).toBe(200)
 
     const preflight = yield* Effect.promise(() =>
       handler(
-        new Request("http://opencode.local/api/status", {
+        new Request("http://opencode.local/api/info", {
           method: "OPTIONS",
           headers: {
             origin: "http://localhost:3000",
@@ -156,7 +215,7 @@ it.live("applies custom CORS origins to HTTP responses and PTY ticket checks", (
           const allowed = origin !== "https://untrusted.example.com"
           const preflight = yield* Effect.promise(() =>
             handler(
-              new Request("http://opencode.local/api/status", {
+              new Request("http://opencode.local/api/info", {
                 method: "OPTIONS",
                 headers: {
                   origin,
@@ -172,7 +231,7 @@ it.live("applies custom CORS origins to HTTP responses and PTY ticket checks", (
 
           const response = yield* Effect.promise(() =>
             handler(
-              new Request("http://opencode.local/api/status", {
+              new Request("http://opencode.local/api/info", {
                 headers: { origin, authorization: `Basic ${btoa("opencode:secret")}` },
               }),
             ),
@@ -190,8 +249,86 @@ it.live("applies custom CORS origins to HTTP responses and PTY ticket checks", (
           )
           // Allowed origins pass the ticket guard and reach the missing-terminal lookup.
           expect(ticket.status).toBe(allowed ? 404 : 403)
+
+          const invalidTicket = yield* Effect.promise(() =>
+            handler(
+              new Request("http://opencode.local/api/pty/pty_missing/connect?ticket=invalid&location[directory]=/tmp", {
+                headers: { origin },
+              }),
+            ),
+          )
+          expect(invalidTicket.status).toBe(403)
+
+          const connect = yield* Effect.promise(() =>
+            handler(
+              new Request("http://opencode.local/api/pty/pty_missing/connect", {
+                headers: { origin, authorization: `Basic ${btoa("opencode:secret")}` },
+              }),
+            ),
+          )
+          expect(connect.status).toBe(allowed ? 404 : 403)
+
+          const persistentConnect = yield* Effect.promise(() =>
+            handler(
+              new Request("http://opencode.local/api/experimental/persistent-pty/pty_missing/connect?cursor=-1", {
+                headers: { origin, authorization: `Basic ${btoa("opencode:secret")}` },
+              }),
+            ),
+          )
+          expect(persistentConnect.status).toBe(allowed ? 400 : 403)
         }),
     )
+
+    const loaded = yield* Effect.promise(() =>
+      handler(
+        new Request("http://opencode.local/api/debug/location", {
+          headers: { authorization: `Basic ${btoa("opencode:secret")}` },
+        }),
+      ).then((response) => response.json()),
+    )
+    expect(loaded).toEqual([{ directory: process.cwd() }])
+
+    const created = (yield* Effect.promise(() =>
+      handler(
+        new Request("http://opencode.local/api/pty", {
+          method: "POST",
+          headers: {
+            authorization: `Basic ${btoa("opencode:secret")}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"] }),
+        }),
+      ).then((response) => response.json()),
+    )) as { data: { id: string } }
+    const issued = (yield* Effect.promise(() =>
+      handler(
+        new Request(`http://opencode.local/api/pty/${created.data.id}/connect-token`, {
+          method: "POST",
+          headers: {
+            authorization: `Basic ${btoa("opencode:secret")}`,
+            "x-opencode-ticket": "1",
+          },
+        }),
+      ).then((response) => response.json()),
+    )) as { data: { ticket: string } }
+    yield* Effect.promise(() =>
+      handler(
+        new Request(`http://opencode.local/api/pty/${created.data.id}`, {
+          method: "DELETE",
+          headers: { authorization: `Basic ${btoa("opencode:secret")}` },
+        }),
+      ),
+    )
+
+    const consumed = yield* Effect.promise(() =>
+      handler(new Request(`http://opencode.local/api/pty/${created.data.id}/connect?ticket=${issued.data.ticket}`)),
+    )
+    expect(consumed.status).toBe(404)
+
+    const replayed = yield* Effect.promise(() =>
+      handler(new Request(`http://opencode.local/api/pty/${created.data.id}/connect?ticket=${issued.data.ticket}`)),
+    )
+    expect(replayed.status).toBe(403)
   }).pipe(Effect.scoped),
 )
 
@@ -208,6 +345,7 @@ it.live("returns 404 when a previously readable file is deleted", () =>
 
         const readable = yield* Effect.promise(() => handler(new Request(url)))
         expect(readable.status).toBe(200)
+        expect(yield* Effect.promise(() => readable.text())).toBe("content")
 
         yield* Effect.promise(() => fs.unlink(file))
         const missing = yield* Effect.promise(() => handler(new Request(url)))
@@ -261,7 +399,7 @@ it.live(
       expect(yield* Effect.promise(() => response.json())).toEqual({
         _tag: "InvalidRequestError",
         message:
-          "OpenAI browser login needs local port 1455 or 1457, but both are already in use. Stop the processes using those ports or choose ChatGPT Pro/Plus (headless), then try again.",
+          "OpenAI browser login needs local port 1455 or 1457, but both are already in use. Stop the processes using those ports or choose Codex device code (legacy), then try again.",
         kind: "integration_authorization",
       })
     }),
@@ -465,7 +603,7 @@ it.live("stays serviceable when the first request aborts", () =>
 
     const aborted = yield* Effect.promise(() => {
       const controller = new AbortController()
-      const first = handler(new Request("http://opencode.local/api/status", { signal: controller.signal }))
+      const first = handler(new Request("http://opencode.local/api/info", { signal: controller.signal }))
       controller.abort()
       return first.then(
         () => "resolved" as const,
@@ -474,7 +612,7 @@ it.live("stays serviceable when the first request aborts", () =>
     })
     expect(["resolved", "rejected"]).toContain(aborted)
 
-    const second = yield* Effect.promise(() => handler(new Request("http://opencode.local/api/status")))
+    const second = yield* Effect.promise(() => handler(new Request("http://opencode.local/api/info")))
     expect(second.status).toBe(200)
   }),
 )

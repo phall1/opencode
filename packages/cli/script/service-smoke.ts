@@ -2,7 +2,7 @@
 
 import { NodeFileSystem } from "@effect/platform-node"
 import { Service } from "@opencode/client/effect/service"
-import { ServerStatus } from "@opencode/protocol/groups/server"
+import { ServerInfo } from "@opencode/protocol/groups/server"
 import { Effect, Schema } from "effect"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -42,25 +42,26 @@ try {
   const credential = btoa(`opencode:${info.password}`)
   const headers = { authorization: "Basic " + credential }
   const token = encodeURIComponent(credential)
-  const status = await waitForReady(info.url, headers)
-  if (status.pid !== info.pid) throw new Error("Status process does not match registration")
-  const tokenStatus = await fetch(new URL(`/api/status?auth_token=${token}`, info.url), {
+  const serverInfo = await waitForReady(info.url, headers)
+  if (serverInfo.pid !== info.pid) throw new Error("Server info does not match registration")
+  const tokenInfo = await fetch(new URL(`/api/info?auth_token=${token}`, info.url), {
     signal: AbortSignal.timeout(5_000),
   })
-  if (tokenStatus.status !== 200) throw new Error("Compiled service rejected query authentication")
+  if (tokenInfo.status !== 200) throw new Error("Compiled service rejected query authentication")
   const tokenOpenApi = await fetch(new URL(`/openapi.json?auth_token=${token}`, info.url), {
     signal: AbortSignal.timeout(5_000),
   })
   if (tokenOpenApi.status !== 200) throw new Error("Compiled application rejected query authentication")
+  await verifyWebUi(info.url)
   if ((await pluginIDs(info.url, headers)).includes("smoke")) throw new Error("Smoke plugin existed before creation")
   const plugin = path.join(root, ".opencode", "plugins", "smoke.ts")
   await fs.writeFile(plugin, pluginSource())
-  await waitForPlugin(info.url, headers)
+  await waitForPlugin(info.url, headers, plugin)
 
-  const unauthorizedStatus = await fetch(new URL("/api/status", info.url), {
+  const unauthorizedInfo = await fetch(new URL("/api/info", info.url), {
     signal: AbortSignal.timeout(5_000),
   })
-  if (unauthorizedStatus.status !== 401) throw new Error("Compiled service exposed status without authentication")
+  if (unauthorizedInfo.status !== 401) throw new Error("Compiled service exposed info without authentication")
   const unauthorizedOpenApi = await fetch(new URL("/openapi.json", info.url), {
     signal: AbortSignal.timeout(5_000),
   })
@@ -79,9 +80,7 @@ try {
   if (!winner || !loser) throw new Error("Compiled contenders did not elect one registered owner")
   if (!(await exitsWithin(loser, 10_000))) throw new Error("Losing compiled contender did not exit")
 
-  await Effect.runPromise(
-    Service.stop({ file: registration }).pipe(Effect.provide(NodeFileSystem.layer)),
-  )
+  await Effect.runPromise(Service.stop({ file: registration }).pipe(Effect.provide(NodeFileSystem.layer)))
   if (!(await exitsWithin(winner, 10_000))) throw new Error("Compiled service did not stop")
   for (let attempt = 0; attempt < 200 && (await Bun.file(registration).exists()); attempt++) await Bun.sleep(25)
   if (await Bun.file(registration).exists()) throw new Error("Compiled service registration was not removed")
@@ -125,21 +124,39 @@ async function waitForRegistration() {
   throw new Error("Compiled service did not publish registration")
 }
 
+// Reads the web UI from the binary's embedded archive: the shell, and the entry script it names.
+async function verifyWebUi(url: string) {
+  const shell = await fetch(url, { signal: AbortSignal.timeout(5_000) })
+  const html = await shell.text()
+  if (shell.status !== 200 || !html.includes("<html")) throw new Error("Compiled service did not serve the web UI")
+  const script = html.match(/<script[^>]*\bsrc="(\/_assets\/[^"]+\.js)"/)?.[1]
+  if (!script) throw new Error("Compiled web UI names no entry script")
+  const entry = await fetch(new URL(script, url), { signal: AbortSignal.timeout(5_000) })
+  if (entry.status !== 200 || (await entry.text()).length === 0)
+    throw new Error(`Compiled service did not serve ${script}`)
+}
+
 async function waitForReady(url: string, headers: HeadersInit) {
   const deadline = Date.now() + 20_000
   while (Date.now() < deadline) {
-    const response = await fetch(new URL("/api/status", url), {
+    const response = await fetch(new URL("/api/info", url), {
       headers,
       signal: AbortSignal.timeout(1_000),
     }).catch(() => undefined)
-    if (response?.ok) return Schema.decodeUnknownPromise(ServerStatus)(await response.json())
+    if (response?.ok) return Schema.decodeUnknownPromise(ServerInfo)(await response.json())
     await Bun.sleep(25)
   }
   throw new Error("Compiled service did not become ready")
 }
 
 function exitsWithin(process: Bun.Subprocess, milliseconds: number) {
-  return Promise.race([process.exited.then(() => true), Bun.sleep(milliseconds).then(() => false)])
+  return new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => resolve(false), milliseconds)
+    process.exited.then(() => {
+      clearTimeout(timeout)
+      resolve(true)
+    })
+  })
 }
 
 function pluginSource() {
@@ -159,11 +176,15 @@ async function pluginIDs(url: string, headers: HeadersInit) {
   )
 }
 
-async function waitForPlugin(url: string, headers: HeadersInit) {
+async function waitForPlugin(url: string, headers: HeadersInit, plugin: string) {
   const deadline = Date.now() + 10_000
+  let attempt = 0
   while (Date.now() < deadline) {
     if ((await pluginIDs(url, headers)).includes("smoke")) return
     await Bun.sleep(25)
+    // Native watchers may coalesce a single creation edge. Keep changing valid source so
+    // the smoke proves that a later native event is delivered.
+    if (++attempt % 10 === 0) await fs.writeFile(plugin, `${pluginSource()}// watcher retry ${attempt}\n`)
   }
   throw new Error("Compiled service did not discover the created plugin")
 }

@@ -1,30 +1,26 @@
-import { batch, createEffect, createMemo, onCleanup } from "solid-js"
+import { batch, createComputed, createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { isFileNotFoundError } from "@opencode/client/promise"
 import { createSimpleContext } from "@opencode/ui/context"
 import { showToast } from "@/shell/notifications/toast"
 import { useParams } from "@solidjs/router"
-import { base64Encode } from "@opencode/util/encode"
-import { getFilename } from "@opencode/util/path"
+import { getDirectory, getFilename } from "@opencode/util/path"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useLanguage } from "@/runtime/i18n/language"
-import { useLayout } from "@/shell/state/layout"
+import { useExtensionAttachment } from "@/runtime/extension/host-apis"
 import { createPathHelpers } from "./path"
+import { fileContentFromBytes } from "./artifact"
 import {
   approxBytes,
   evictContentLru,
-  getFileContentBytesTotal,
-  getFileContentEntryCount,
   hasFileContent,
   removeFileContentBytes,
   resetFileContentLru,
-  setFileContentBytes,
   touchFileContent,
 } from "./content-cache"
 import { createFileViewCache } from "./view-cache"
 import { useServerSDK } from "@/runtime/server/client"
 import { formatServerError } from "@/runtime/server/errors"
-import { SessionRouteKey, SessionStateKey } from "@/runtime/server/scope"
 import { createFileTreeStore } from "./tree-store"
 import { invalidateFromWatcher } from "./watcher"
 import {
@@ -36,16 +32,8 @@ import {
 } from "./types"
 
 export type { FileSelection, SelectedLineRange, FileViewState, FileState }
+
 export { selectionFromLines }
-export {
-  evictContentLru,
-  getFileContentBytesTotal,
-  getFileContentEntryCount,
-  removeFileContentBytes,
-  resetFileContentLru,
-  setFileContentBytes,
-  touchFileContent,
-}
 
 export const { use: useFile, provider: FileProvider } = createSimpleContext({
   name: "File",
@@ -55,15 +43,13 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
     const params = useParams()
     const serverSDK = useServerSDK()
     const language = useLanguage()
-    const layout = useLayout()
+    const extensions = useExtensionAttachment()
 
     const scope = createMemo(() => sdk().directory)
     const path = createPathHelpers(scope)
-    const tabs = layout.tabs(() =>
-      SessionStateKey.from(serverSDK.scope, SessionRouteKey.fromRoute(base64Encode(sdk().directory), params.id)),
-    )
 
     const inflight = new Map<string, Promise<void>>()
+
     const [store, setStore] = createStore<{
       file: Record<string, FileState>
     }>({
@@ -77,7 +63,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         serverSDK.api.file.list({ path: dir, location: { directory: scope() } }).then((x) =>
           x.data.map((entry) => ({
             ...entry,
-            name: entry.path.split("/").at(-1) ?? entry.path,
+            name: getFilename(entry.path),
             absolute: `${scope()}/${entry.path}`,
             ignored: false,
           })),
@@ -105,21 +91,26 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       })
     }
 
-    createEffect(() => {
-      scope()
-      inflight.clear()
-      resetFileContentLru()
-      batch(() => {
-        setStore("file", reconcile({}))
-        tree.reset()
-      })
-    })
+    // The store holds one directory's files. Drop them as soon as the directory changes, before any effect of the same
+    // update reads the new one: a file tab can load its file before a later watcher runs, and a reset after that load
+    // would discard its reply.
+    createComputed(
+      on(scope, () => {
+        inflight.clear()
+        resetFileContentLru()
+        batch(() => {
+          setStore("file", reconcile({}))
+          tree.reset()
+        })
+      }),
+    )
 
     const viewCache = createFileViewCache(serverSDK.scope)
     const view = createMemo(() => viewCache.load(scope(), params.id))
 
     const ensure = (file: string) => {
       if (!file) return
+
       if (store.file[file]) return
       setStore("file", file, { path: file, name: getFilename(file) })
     }
@@ -157,6 +148,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
           draft.loading = false
           draft.notFound = notFound
           draft.error = message
+
           if (!notFound) return
           draft.loaded = false
           draft.content = undefined
@@ -171,6 +163,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
 
     const load = (input: string, options?: { force?: boolean }) => {
       const file = path.normalize(input)
+
       if (!file) return Promise.resolve()
 
       const directory = scope()
@@ -178,21 +171,27 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       ensure(file)
 
       const current = store.file[file]
+
       if (!options?.force && current?.loaded) return Promise.resolve()
 
       const pending = inflight.get(key)
+
       if (pending) return pending
 
       setLoading(file)
 
+      // Files outside the workspace are read from their own directory, like markdown images.
+      // The trailing separator from getDirectory keeps "/" and "C:/" valid, like readLocalImage.
+      const request = path.absolute(file)
+        ? { path: getFilename(file), location: { directory: getDirectory(file) } }
+        : { path: file, location: { directory } }
+
       const promise = serverSDK.api.file
-        .read({ path: file, location: { directory } })
+        .read(request)
         .then((data) => {
           if (scope() !== directory) return
-          const content = { type: "text" as const, content: new TextDecoder().decode(data) }
+          const content = fileContentFromBytes(file, data)
           setLoaded(file, content)
-
-          if (!content) return
           touchFileContent(file, approxBytes(content))
           evictContent(new Set([file]))
         })
@@ -209,7 +208,22 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         })
 
       inflight.set(key, promise)
+
       return promise
+    }
+
+    // Lists the parent directory instead of reading the file, so checking a path a message names transfers no content.
+    const exists = (input: string) => {
+      const file = path.normalize(input)
+
+      if (!file) return Promise.resolve(false)
+
+      const parent = /[\\/]/.test(file) ? getDirectory(file) : undefined
+
+      return serverSDK.api.file.list({ path: parent, location: { directory: scope() } }).then(
+        (x) => x.data.some((entry) => entry.type === "file" && getFilename(entry.path) === getFilename(file)),
+        () => false,
+      )
     }
 
     const search = (query: string, dirs: "true" | "false", options?: { limit?: number; signal?: AbortSignal }) =>
@@ -227,6 +241,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
           (x) => x.data.map((entry) => path.normalize(entry.path)),
           (error) => {
             if (options?.signal?.aborted) throw error
+
             return []
           },
         )
@@ -236,7 +251,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         invalidateFromWatcher(event, {
           normalize: path.normalize,
           hasFile: (file) => Boolean(store.file[file]),
-          isOpen: (file) => tabs.all().some((tab) => path.pathFromTab(tab) === file),
+          isOpen: (file) => extensions.files.opened().includes(file),
           loadFile: (file) => {
             void load(file, { force: true })
           },
@@ -247,6 +262,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
           },
         })
       })
+
       onCleanup(stop)
     })
 
@@ -254,23 +270,30 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       const file = path.normalize(input)
       const state = store.file[file]
       const content = state?.content
+
       if (!content) return state
+
       if (hasFileContent(file)) {
         touchFileContent(file)
+
         return state
       }
+
       touchFileContent(file, approxBytes(content))
+
       return state
     }
 
-    function withPath(input: string, action: (file: string) => unknown) {
+    function withPath<T>(input: string, action: (file: string) => T) {
       return action(path.normalize(input))
     }
+
     const scrollTop = (input: string) => withPath(input, (file) => view().scrollTop(file))
     const scrollLeft = (input: string) => withPath(input, (file) => view().scrollLeft(file))
     const selectedLines = (input: string) => withPath(input, (file) => view().selectedLines(file))
     const setScrollTop = (input: string, top: number) => withPath(input, (file) => view().setScrollTop(file, top))
     const setScrollLeft = (input: string, left: number) => withPath(input, (file) => view().setScrollLeft(file, left))
+
     const setSelectedLines = (input: string, range: SelectedLineRange | null) =>
       withPath(input, (file) => view().setSelectedLines(file, range))
 
@@ -281,8 +304,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
     return {
       ready: () => view().ready(),
       normalize: path.normalize,
-      tab: path.tab,
-      pathFromTab: path.pathFromTab,
+      absolute: path.absolute,
       tree: {
         list: tree.listDir,
         refresh: (input: string) => tree.listDir(input, { force: true }),
@@ -294,6 +316,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       get,
       notFound: (input: string) => store.file[path.normalize(input)]?.notFound ?? false,
       load,
+      exists,
       scrollTop,
       scrollLeft,
       setScrollTop,
@@ -302,7 +325,8 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       setSelectedLines,
       searchFiles: (query: string, options?: { limit?: number; signal?: AbortSignal }) =>
         search(query, "false", options),
-      searchFilesAndDirectories: (query: string) => search(query, "true"),
+      searchFilesAndDirectories: (query: string, options?: { limit?: number; signal?: AbortSignal }) =>
+        search(query, "true", options),
     }
   },
 })

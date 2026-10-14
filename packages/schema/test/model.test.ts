@@ -53,26 +53,39 @@ describe("Model.Compatibility", () => {
       requireAssistantAfterTool: true,
     })
   })
+
+  test("keeps capability overrides that gate protocol features", () => {
+    const decode = Schema.decodeUnknownSync(Model.Compatibility)
+
+    for (const supportsEffortUpdates of [false, true]) {
+      expect(decode({ supportsEffortUpdates, supportsThinkingBlockBinding: true })).toEqual({
+        supportsEffortUpdates,
+        supportsThinkingBlockBinding: true,
+      })
+    }
+  })
+
+  test("omits undefined protocol capability overrides when encoded", () => {
+    expect(
+      Schema.encodeSync(Model.Compatibility)({
+        supportsEffortUpdates: undefined,
+        supportsThinkingBlockBinding: undefined,
+      }),
+    ).toEqual({})
+  })
 })
 
 describe("Model.Info", () => {
-  test("provider compaction policy is optional and uses the canonical closed schema", () => {
+  test("provider compaction policy is a typed setting", () => {
     const model = Model.Info.default(Provider.ID.openai, Model.ID.make("gpt-5.4-mini"))
-    expect(Schema.encodeSync(Model.Info)({ ...model, compaction: undefined })).not.toHaveProperty("compaction")
-    expect(Schema.decodeUnknownSync(Model.Info)({ ...model, compaction: { mode: "provider" } }).compaction).toEqual({
-      mode: "provider",
+    expect(Schema.encodeSync(Model.Info)({ ...model, settings: { compaction: undefined } }).settings).toEqual({})
+    expect(
+      Schema.decodeUnknownSync(Model.Info)({ ...model, settings: { compaction: { type: "native" } } }).settings,
+    ).toEqual({
+      compaction: { type: "native" },
     })
-    expect(Schema.decodeUnknownSync(Provider.Compaction)({ mode: "local" })).toEqual({ mode: "local" })
-    expect(Schema.encodeSync(Provider.Compaction)({ mode: "provider", threshold: undefined })).toEqual({
-      mode: "provider",
-    })
-    expect(Schema.decodeUnknownSync(Provider.Compaction)({ mode: "provider", threshold: 120_000 })).toEqual({
-      mode: "provider",
-      threshold: 120_000,
-    })
-    for (const threshold of [0, -1, 1.5])
-      expect(() => Schema.decodeUnknownSync(Provider.Compaction)({ mode: "provider", threshold })).toThrow()
-    expect(() => Schema.decodeUnknownSync(Provider.Compaction)({ mode: "automatic" })).toThrow()
+    expect(Schema.decodeUnknownSync(Provider.Compaction)({ type: "summary" })).toEqual({ type: "summary" })
+    expect(() => Schema.decodeUnknownSync(Provider.Compaction)({ type: "automatic" })).toThrow()
   })
 
   test("uses practical token limits for unknown models", () => {
@@ -82,11 +95,10 @@ describe("Model.Info", () => {
   })
 })
 
-describe("Model.Capabilities", () => {
-  test("decodes the optional transport preference", () => {
-    const model = Model.Info.default(Provider.ID.openai, Model.ID.make("gpt-5.4-mini"))
-    expect(Schema.encodeSync(Model.Info)({ ...model, transport: undefined })).not.toHaveProperty("transport")
-    expect(Schema.decodeUnknownSync(Model.Info)({ ...model, transport: "websocket" }).transport).toBe("websocket")
-    expect(() => Schema.decodeUnknownSync(Model.Info)({ ...model, transport: "sse" })).toThrow()
+describe("Model.Settings", () => {
+  test("preserves provider-specific model options", () => {
+    expect(Schema.decodeUnknownSync(Model.Settings)({ providerOption: true })).toEqual({
+      providerOption: true,
+    })
   })
 })

@@ -6,19 +6,15 @@ import { SessionRestart } from "@opencode/core/session/execution/restart"
 import { InstallationEvent } from "@opencode/schema/installation-event"
 import { hasPtyConnectTicketURL } from "@opencode/protocol/groups/pty"
 import { hasPersistentPtyConnectTicketURL } from "@opencode/protocol/groups/persistent-pty"
+import { isPairingConnectURL } from "@opencode/protocol/groups/server"
+import { Global } from "@opencode/util/global"
 import { Cause, Context, Effect, Exit, Latch, Layer, Option, Ref, Scope } from "effect"
-import {
-  HttpMiddleware,
-  HttpPlatform,
-  HttpRouter,
-  HttpServer,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "effect/unstable/http"
+import { HttpMiddleware, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { NetAddress } from "effect/net"
 import { createServer } from "node:http"
 import { ServerAuth } from "./auth"
 import { isAllowedCorsOrigin } from "./cors"
-import { authorizedRequest } from "./middleware/authorization"
+import { authorizedRequest, unauthorizedResponse } from "./middleware/authorization"
 import { withoutParentSpan } from "./request-tracing"
 import { createRoutes } from "./routes"
 import { ServerInfo } from "./server-info"
@@ -27,7 +23,7 @@ import type { ServerOptions } from "./options"
 
 export interface Lifecycle<E = never, R = never> {
   readonly onListen: (
-    address: HttpServer.Address,
+    address: NetAddress.SocketAddress,
     shutdown: Effect.Effect<void>,
   ) => Effect.Effect<Effect.Effect<void>, E, R>
 }
@@ -52,6 +48,7 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
   options: ServerOptions,
   lifecycle?: Lifecycle<E, R>,
   transform?: Transform,
+  remoteURLs?: () => ReadonlyArray<string>,
 ) {
   const password = options.password
   if (!password) return yield* Effect.fail(new Error("Missing server password"))
@@ -60,22 +57,25 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
   const shutdown = yield* Latch.make()
   const status = yield* Status.make()
   const bound = yield* listen({ hostname, port })
-  const urls = () => {
+  const localURLs = () => {
     const address = bound.server.address()
     if (address === null || typeof address === "string") return []
     const host = address.family === "IPv6" ? `[${address.address}]` : address.address
     return ServerInfo.connectionURLs(`http://${host}:${address.port}`, hostname)
   }
+  const urls = () => [...localURLs(), ...(remoteURLs?.() ?? [])]
   const application = yield* Ref.make(Option.none<App>())
+  const app = dispatch(password, status, application, options.app?.version ?? "unknown", urls, Global.Path.tmp)
   // Request fibers may continue inbound trace context, but must not inherit the server startup parent.
   yield* bound.http
     .serve(
-      dispatch(password, status, application, options.app?.version ?? "unknown", urls).pipe(
+      (transform ? transform(app) : app).pipe(
+        HttpMiddleware.compression(),
         HttpMiddleware.cors({ allowedOrigins: (origin) => isAllowedCorsOrigin(origin, options), maxAge: 86_400 }),
       ),
       errorResponseLogger,
     )
-    .pipe(withoutParentSpan)
+    .pipe(Effect.provide(NodeHttpServer.layerHttpServices), withoutParentSpan)
   if (lifecycle)
     yield* lifecycle.onListen(bound.http.address, shutdown.open.pipe(Effect.asVoid)).pipe(
       Effect.flatMap((cleanup) =>
@@ -109,13 +109,7 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
         Effect.provideService(Scope.Scope, applicationScope),
       )
     }
-    const app = Context.get(context, HttpRouter.HttpRouter)
-      .asHttpEffect()
-      .pipe(
-        HttpMiddleware.compression(),
-        Effect.provideService(HttpPlatform.HttpPlatform, Context.get(context, HttpPlatform.HttpPlatform)),
-      )
-    yield* Ref.set(application, Option.some(transform ? transform(app) : app))
+    yield* Ref.set(application, Option.some(Context.get(context, HttpRouter.HttpRouter).asHttpEffect()))
     yield* status.ready
     const bus = Context.get(context, Bus.Service)
     return {
@@ -182,43 +176,39 @@ function dispatch(
   application: Ref.Ref<Option.Option<App>>,
   version: string,
   urls: () => ReadonlyArray<string>,
+  tmp: string,
 ): App {
   const auth = ServerAuth.Config.of({ password: Option.some(password), username: "opencode" })
   return Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const url = new URL(request.url, "http://localhost")
-    if (request.method === "GET" && url.pathname === "/api/status") {
-      if (!(yield* authorizedRequest(request, auth))) return unauthorized()
-      return yield* statusResponse(status, version, urls)
-    }
     const state = yield* status.current
     const app = yield* Ref.get(application)
     const ready = state.type === "ready" && Option.isSome(app)
+    if (request.method === "GET" && url.pathname === "/api/info" && !ready) {
+      if (!(yield* authorizedRequest(request, auth))) return unauthorizedResponse(request)
+      return yield* infoResponse(status, version, urls, tmp)
+    }
     if (
+      !isPairingConnectURL(url) &&
       (!ready || (!hasPtyConnectTicketURL(url) && !hasPersistentPtyConnectTicketURL(url))) &&
       !(yield* authorizedRequest(request, auth))
     )
-      return unauthorized()
+      return unauthorizedResponse(request)
     if (ready) return yield* app.value
     return unavailable(state)
   })
 }
 
-function unauthorized() {
-  return HttpServerResponse.empty({
-    status: 401,
-    headers: { "www-authenticate": 'Basic realm="Secure Area"' },
-  })
-}
-
-const statusResponse = Effect.fnUntraced(function* (
+const infoResponse = Effect.fnUntraced(function* (
   status: Status.Interface,
   version: string,
   urls: () => ReadonlyArray<string>,
+  tmp: string,
 ) {
   const state = yield* status.current
   return HttpServerResponse.jsonUnsafe(
-    { version, pid: process.pid, urls: urls() },
+    { version, pid: process.pid, urls: urls(), paths: { tmp } },
     {
       status: state.type === "ready" ? 200 : state.type === "failed" ? 500 : 503,
       headers: state.type === "starting" || state.type === "stopping" ? { "retry-after": "1" } : undefined,

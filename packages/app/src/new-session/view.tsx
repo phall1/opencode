@@ -1,8 +1,7 @@
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { Icon } from "@opencode/ui/icon"
-import { Show, Suspense, createMemo, createSignal, lazy } from "solid-js"
-import { createStore } from "solid-js/store"
+import { Show, createMemo, createSignal } from "solid-js"
 import { Schema } from "effect"
 import createPresence from "solid-presence"
 import { Composer } from "@/composer/composer"
@@ -22,13 +21,6 @@ import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import type { NewSessionWorkspaceController } from "./workspace/controller"
 import { NewSessionWordmark } from "./wordmark"
-import { SummaryPopover } from "@/session/summary/popover"
-import type { DraftMcpControls } from "./mcp"
-
-const NewSessionSummary = lazy(async () => {
-  const { NewSessionSummary } = await import("./summary")
-  return { default: NewSessionSummary }
-})
 
 const providerTipDismissalDuration = 30 * 24 * 60 * 60 * 1000
 
@@ -46,16 +38,16 @@ export function NewSessionView(props: {
   composer: ComposerModel
   project: PromptProjectController
   workspace: NewSessionWorkspaceController
-  mcp: DraftMcpControls
 }) {
-  const [store, setStore] = createStore({ summary: false })
   const [onboarding, setOnboarding, , onboardingReady] = persisted(
     Persist.global("workspace-onboarding"),
     WorkspaceOnboardingSchema,
     { used: false },
   )
+
   const select = (value: string) => {
     props.workspace.selection.set(value)
+
     if (value !== "main") setOnboarding("used", true)
   }
 
@@ -69,25 +61,6 @@ export function NewSessionView(props: {
           active={props.composer.state.drag === "active"}
           input={props.composer.model.selection.current()?.capabilities.input}
         />
-        <div
-          data-slot="new-session-summary"
-          class="absolute inset-x-0 top-0 z-20 flex h-12 items-center justify-end px-3"
-        >
-          <SummaryPopover open={store.summary} onOpenChange={(open) => setStore("summary", open)}>
-            <Suspense>
-              <NewSessionSummary
-                project={props.project.selected()}
-                workspace={props.workspace}
-                mcp={props.mcp}
-                shown={store.summary}
-                onChooseProject={() => {
-                  setStore("summary", false)
-                  props.project.add()
-                }}
-              />
-            </Suspense>
-          </SummaryPopover>
-        </div>
         <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
           <div class={NEW_SESSION_CONTENT_WIDTH}>
             <NewSessionWordmark />
@@ -97,7 +70,7 @@ export function NewSessionView(props: {
                 <PromptProjectAddButton controller={props.project} />
               </Show>
               <Show when={props.project.selected()}>
-                <div class="flex min-h-7 min-w-0 flex-col items-center justify-center gap-0 text-v2-text-text-faint sm:flex-row">
+                <div class="flex min-h-7 min-w-0 flex-row flex-wrap items-center justify-center gap-0 text-v2-text-text-faint">
                   <PromptProjectSelector controller={props.project} placement="bottom" />
                   <Show
                     when={props.workspace.bar.visible()}
@@ -129,6 +102,8 @@ export function NewSessionView(props: {
           </div>
         </div>
         <NewSessionTips
+          selection={props.composer.model.selection}
+          onDone={props.composer.restoreFocus}
           workspaceEligible={
             !!props.project.selected() &&
             props.workspace.bar.visible() &&
@@ -142,63 +117,87 @@ export function NewSessionView(props: {
   )
 }
 
-function NewSessionTips(props: { workspaceEligible: boolean; onWorkspace: () => void }) {
+function NewSessionTips(props: {
+  selection: ComposerModel["model"]["selection"]
+  onDone: () => void
+  workspaceEligible: boolean
+  onWorkspace: () => void
+}) {
   const language = useLanguage()
   const dialog = useDialog()
   const sdk = useWorkspaceLocation()
   const providers = useProviders(() => sdk().directory)
+
   const [providerState, setProviderState, , providerReady] = persisted(
     Persist.global("new-session.provider-tip"),
     ProviderTipSchema,
     { dismissedAt: 0 },
   )
+
   const [workspaceState, setWorkspaceState, , workspaceReady] = persisted(
     Persist.global("new-session.workspace-tip"),
     WorkspaceTipSchema,
     { dismissedAt: 0 },
   )
+
   const workspaceVisible = createMemo(
     () =>
       props.workspaceEligible &&
       workspaceReady() &&
       Date.now() - workspaceState.dismissedAt >= providerTipDismissalDuration,
   )
+
   const providerVisible = createMemo(
     () =>
-      providers.ready() &&
       providerReady() &&
-      providers.paid().length === 0 &&
+      providers.anyConnection() === false &&
       Date.now() - providerState.dismissedAt >= providerTipDismissalDuration,
   )
+
   const tip = createMemo<"workspace" | "provider" | undefined>(() => {
     if (providerVisible()) return "provider"
+
     if (workspaceVisible()) return "workspace"
   })
+
   const displayed = createMemo<"workspace" | "provider" | undefined>((previous) => tip() ?? previous)
   const [ref, setRef] = createSignal<HTMLDivElement>()
+
   const presence = createPresence({
     show: () => tip() !== undefined,
     element: () => ref() ?? null,
   })
+
   const open = () => {
     const current = tip()
+
     if (!current) return
+
     if (current === "workspace") {
       setWorkspaceState("dismissedAt", Date.now())
       props.onWorkspace()
+
       return
     }
+
     void import("@/providers/connect/dialog").then(({ DialogConnectProvider }) => {
-      void dialog.show(() => <DialogConnectProvider directory={sdk().directory} />)
+      void dialog.show(() => (
+        <DialogConnectProvider directory={sdk().directory} selection={props.selection} onDone={props.onDone} />
+      ))
     })
   }
+
   const dismiss = () => {
     const current = tip()
+
     if (!current) return
+
     if (current === "workspace") {
       setWorkspaceState("dismissedAt", Date.now())
+
       return
     }
+
     setProviderState("dismissedAt", Date.now())
   }
 

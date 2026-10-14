@@ -38,7 +38,7 @@ import { expandPastedTextPlaceholders, expandTrackedPastedText } from "../../pro
 import { usePromptStash } from "../../prompt/stash"
 import { DialogStash } from "../dialog-stash"
 import { type AutocompleteOption, type AutocompleteRef, Autocomplete } from "./autocomplete"
-import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { Locale } from "../../util/locale"
 import { errorMessage } from "../../util/error"
 import { createColors, createFrames } from "../../ui/spinner"
@@ -53,6 +53,7 @@ import { usePromptMove } from "./move"
 import { resolvePastedAttachments } from "./local-attachment"
 import { locationKey, useData } from "../../context/data"
 import { useLocation } from "../../context/location"
+import { useArgs } from "../../context/args"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
 import { useInteractivity } from "../../context/interactivity"
 import { abbreviateHome } from "../../runtime"
@@ -78,9 +79,6 @@ export type PromptProps = {
   onSubmit?: () => void
   onEmptySubmit?: () => boolean | Promise<boolean>
   ref?: (ref: PromptRef | undefined) => void
-  hint?: JSX.Element
-  right?: JSX.Element
-  showPlaceholder?: boolean
   placeholders?: {
     normal?: string[]
     shell?: string[]
@@ -90,6 +88,8 @@ export type PromptProps = {
 export type PromptRef = {
   focused: boolean
   current: PromptInfo
+  mode: "normal" | "shell"
+  setMode(mode: "normal" | "shell"): void
   set(prompt: PromptInfo): void
   reset(): void
   blur(): void
@@ -204,6 +204,7 @@ export function Prompt(props: PromptProps) {
   const directoryRecents = useDirectoryRecents()
   const keymapCommands = Keymap.useCommands()
   const currentLocation = useLocation()
+  const args = useArgs()
   const config = useConfig().data
   const dialog = useDialog()
   const toast = useToast()
@@ -311,7 +312,6 @@ export function Prompt(props: PromptProps) {
   }))
   const [cursorVersion, setCursorVersion] = createSignal(0)
   const connected = useConnected()
-  const hasRightContent = createMemo(() => Boolean(props.right))
 
   function promptModelWarning() {
     toast.show({
@@ -350,7 +350,7 @@ export function Prompt(props: PromptProps) {
 
   createEffect(() => {
     if (!input || input.isDestroyed) return
-    input.cursorColor = disabled() ? theme.background.surface.offset : theme.text.default
+    input.cursorColor = disabled() ? theme.background.raised.base : theme.text.base
     if (config.cursor) input.cursorStyle = config.cursor
   })
 
@@ -672,12 +672,18 @@ export function Prompt(props: PromptProps) {
     get current() {
       return store.prompt
     },
+    get mode() {
+      return store.mode
+    },
     focus() {
       if (disabled()) return
       input.focus()
     },
     blur() {
       input.blur()
+    },
+    setMode(mode) {
+      setStore("mode", mode)
     },
     set(prompt) {
       input.setText(prompt.text)
@@ -1114,7 +1120,17 @@ export function Prompt(props: PromptProps) {
     if (!trimmed && (!props.sessionID || store.mode === "shell" || delivery === "queue"))
       return delivery === "steer" ? (await props.onEmptySubmit?.()) === true : false
     const exitWord = trimmed === "exit" || trimmed === "quit" || trimmed === ":q"
-    const slash = argumentSlash(store.prompt.text, keymapCommands())
+    const inputText = expandTrackedPastedText(
+      store.prompt.text,
+      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+        const ref = store.extmarkToPart.get(extmark.id)
+        if (ref?.type !== "pasted") return []
+        const part = store.prompt.pasted[ref.index]
+        if (!part) return []
+        return [{ start: extmark.start, end: extmark.end, text: part.text }]
+      }),
+    )
+    const slash = argumentSlash(inputText, keymapCommands())
     if (delivery === "queue" && (store.mode === "shell" || exitWord || slash)) {
       toast.show({ message: "This prompt cannot be queued", variant: "warning" })
       return false
@@ -1128,16 +1144,6 @@ export function Prompt(props: PromptProps) {
       await slash.command.run(slash.input)
       return true
     }
-    const inputText = expandTrackedPastedText(
-      store.prompt.text,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const ref = store.extmarkToPart.get(extmark.id)
-        if (ref?.type !== "pasted") return []
-        const part = store.prompt.pasted[ref.index]
-        if (!part) return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
-    )
     const slashHead = parseSlashHead(inputText, /\s/)
     const isCommand =
       slashHead !== undefined &&
@@ -1221,7 +1227,9 @@ export function Prompt(props: PromptProps) {
       // a local session record synchronously, so the navigation below happens
       // immediately — enter feels sent even while the create round-trip is in
       // flight. Sends against the new session gate on the request.
+      const newSessionID = args.takeNewSessionID()
       const created = data.session.create({
+        id: newSessionID,
         location: directory ? { directory } : location,
         agent: agent.id,
         model: {
@@ -1230,6 +1238,7 @@ export function Prompt(props: PromptProps) {
           variant,
         },
       })
+      if (newSessionID !== undefined) created.request.catch(() => args.restoreNewSessionID(newSessionID))
       sessionID = created.id
       session = data.session.get(created.id)
       newSession = {
@@ -1554,9 +1563,9 @@ export function Prompt(props: PromptProps) {
     },
   )
   const highlight = createMemo(() => {
-    if (muted()) return theme.border.default
+    if (muted()) return theme.border.base
     if (store.mode === "shell") return theme.text.action.primary.selected
-    return promptDisplay().agentColor ?? theme.border.default
+    return promptDisplay().agentColor ?? theme.border.base
   })
   const agentLabel = createMemo(() => (store.mode === "shell" ? "Shell" : promptDisplay().agentLabel))
   const animateMetadata = !revealedPromptMetadata.has(local)
@@ -1573,7 +1582,7 @@ export function Prompt(props: PromptProps) {
   createEffect(() => {
     if (agentLabel()) revealedPromptMetadata.add(local)
   })
-  const borderHighlight = createMemo(() => tint(theme.border.default, highlight(), agentMetaAlpha()))
+  const borderHighlight = createMemo(() => tint(theme.border.base, highlight(), agentMetaAlpha()))
   const footerInput = () => ({
     sessionID: props.sessionID,
     mode: store.mode,
@@ -1581,7 +1590,6 @@ export function Prompt(props: PromptProps) {
   })
 
   const placeholderText = createMemo(() => {
-    if (props.showPlaceholder === false) return undefined
     const value = (() => {
       if (store.mode === "shell") {
         if (!shell().length) return undefined
@@ -1622,7 +1630,7 @@ export function Prompt(props: PromptProps) {
   })
 
   const spinnerDef = createMemo(() => {
-    const color = promptDisplay().agentColor ?? theme.border.default
+    const color = promptDisplay().agentColor ?? theme.border.base
     return {
       frames: createFrames({
         color,
@@ -1642,7 +1650,7 @@ export function Prompt(props: PromptProps) {
   })
   const maxHeight = createMemo(() => Math.max(6, Math.floor(dimensions().height / 3)))
 
-  const promptBg = createMemo(() => theme.raise(theme.background.surface.offset))
+  const promptBg = createMemo(() => theme.decrease(theme.background.raised.base))
 
   return (
     <>
@@ -1694,7 +1702,7 @@ export function Prompt(props: PromptProps) {
                           when={!failed()}
                           fallback={
                             <box width="100%" height="100%" alignItems="center" justifyContent="center">
-                              <text fg={theme.text.subdued}>No preview</text>
+                              <text fg={theme.text.muted}>No preview</text>
                             </box>
                           }
                         >
@@ -1726,7 +1734,7 @@ export function Prompt(props: PromptProps) {
                       openImagePreview(visibleImageAttachments().length)
                     }}
                   >
-                    <text fg={theme.text.subdued} wrapMode="none" truncate>
+                    <text fg={theme.text.muted} wrapMode="none" truncate>
                       +{imageAttachments().length - visibleImageAttachments().length} more
                     </text>
                   </box>
@@ -1736,9 +1744,9 @@ export function Prompt(props: PromptProps) {
             <textarea
               width="100%"
               placeholder={placeholderText()}
-              placeholderColor={theme.text.subdued}
-              textColor={muted() ? theme.text.subdued : theme.text.default}
-              focusedTextColor={muted() ? theme.text.subdued : theme.text.default}
+              placeholderColor={theme.text.muted}
+              textColor={muted() ? theme.text.muted : theme.text.base}
+              focusedTextColor={muted() ? theme.text.muted : theme.text.base}
               minHeight={1}
               maxHeight={maxHeight()}
               cursorStyle={config.cursor}
@@ -1799,7 +1807,7 @@ export function Prompt(props: PromptProps) {
                 setTimeout(() => {
                   // setTimeout is a workaround and needs to be addressed properly
                   if (!input || input.isDestroyed) return
-                  input.cursorColor = disabled() ? theme.background.surface.offset : theme.text.default
+                  input.cursorColor = disabled() ? theme.background.raised.base : theme.text.base
                   if (config.cursor) input.cursorStyle = config.cursor
                 }, 0)
               }}
@@ -1818,7 +1826,7 @@ export function Prompt(props: PromptProps) {
                 r.stopPropagation()
               }}
               focusedBackgroundColor="transparent"
-              cursorColor={disabled() ? theme.background.surface.offset : theme.text.default}
+              cursorColor={disabled() ? theme.background.raised.base : theme.text.base}
               syntaxStyle={syntax()}
             />
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
@@ -1835,11 +1843,6 @@ export function Prompt(props: PromptProps) {
                 modelAlpha={modelMetaAlpha()}
                 variantAlpha={variantMetaAlpha()}
               />
-              <Show when={hasRightContent()}>
-                <box flexDirection="row" gap={1} alignItems="center">
-                  {props.right}
-                </box>
-              </Show>
             </box>
           </box>
         </box>
@@ -1885,17 +1888,17 @@ export function Prompt(props: PromptProps) {
                   <Match when={status() === "running"}>
                     <box flexDirection="row" gap={1} flexGrow={1} justifyContent="flex-start">
                       <box marginLeft={1}>
-                        <Show when={config.animations ?? true} fallback={<text fg={theme.text.subdued}>[⋯]</text>}>
+                        <Show when={config.animations ?? true} fallback={<text fg={theme.text.muted}>[⋯]</text>}>
                           <spinner color={spinnerDef().color} frames={spinnerDef().frames} interval={40} />
                         </Show>
                       </box>
                       <PromptInterruptStatus
                         armed={store.interrupt > 0}
                         animations={animationsEnabled()}
-                        text={theme.text.default}
-                        subdued={theme.text.subdued}
-                        warning={theme.text.feedback.warning.default}
-                        flash={theme.decrease(theme.text.feedback.warning.default, 2)}
+                        text={theme.text.base}
+                        subdued={theme.text.muted}
+                        warning={theme.text.feedback.warning.base}
+                        flash={theme.decrease(theme.text.feedback.warning.base, 2)}
                       />
                     </box>
                   </Match>
@@ -1904,7 +1907,7 @@ export function Prompt(props: PromptProps) {
                       <box paddingLeft={3} height={1} minHeight={0} flexShrink={1}>
                         <Spinner color={theme.hue.accent[500]}>
                           {progress()}
-                          <span style={{ fg: theme.text.subdued }}>{".".repeat(move.creatingDots())}</span>
+                          <span style={{ fg: theme.text.muted }}>{".".repeat(move.creatingDots())}</span>
                         </Spinner>
                       </box>
                     )}
@@ -1917,11 +1920,11 @@ export function Prompt(props: PromptProps) {
                     </box>
                   </Match>
                   <Match when={true}>
-                    <Show when={!props.hint && locationLabelDisplay()} fallback={props.hint ?? <text />}>
+                    <Show when={locationLabelDisplay()} fallback={<text />}>
                       {(location) => (
                         <text
                           id="prompt.footer.location"
-                          fg={locationActions.hovered() ? theme.text.default : theme.text.subdued}
+                          fg={locationActions.hovered() ? theme.text.base : theme.text.muted}
                           wrapMode="none"
                           truncate
                           flexGrow={1}
@@ -1945,7 +1948,7 @@ export function Prompt(props: PromptProps) {
                     wrapMode="none"
                     truncate
                     flexShrink={1}
-                    fg={editorContextLabelState() === "pending" ? theme.hue.accent[500] : theme.text.subdued}
+                    fg={editorContextLabelState() === "pending" ? theme.hue.accent[500] : theme.text.muted}
                   >
                     {file()}
                   </text>

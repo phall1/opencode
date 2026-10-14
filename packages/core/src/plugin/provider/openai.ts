@@ -1,5 +1,6 @@
 import type { IntegrationOAuthMethodRegistration } from "@opencode/plugin/effect/integration"
 import { define } from "@opencode/plugin/effect/plugin"
+import type { SessionRequest } from "@opencode/plugin/effect/session"
 import { Deferred, Effect, Option, Schema, Semaphore, Stream } from "effect"
 import type { Server } from "node:http"
 import { App } from "../../app.js"
@@ -8,6 +9,7 @@ import { Bus } from "../../bus.js"
 import { Integration } from "../../integration.js"
 import { OauthCallbackPage } from "../../oauth/page.js"
 import { Provider } from "../../provider.js"
+import { SessionAffinity } from "../../session/affinity.js"
 import type { PluginInternal } from "../internal.js"
 
 const clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -53,7 +55,7 @@ const browser = (app: App.Info) =>
     method: {
       id: browserMethodID,
       type: "oauth",
-      label: "ChatGPT Pro/Plus (browser)",
+      label: "Codex browser (legacy)",
     },
     authorize: () =>
       Effect.gen(function* () {
@@ -121,7 +123,7 @@ function listen(server: Server) {
             Effect.catchIf(addressInUse, () =>
               Effect.fail(
                 new Error(
-                  `OpenAI browser login needs local port ${callbackPort} or ${callbackFallbackPort}, but both are already in use. Stop the processes using those ports or choose ChatGPT Pro/Plus (headless), then try again.`,
+                  `OpenAI browser login needs local port ${callbackPort} or ${callbackFallbackPort}, but both are already in use. Stop the processes using those ports or choose Codex device code (legacy), then try again.`,
                 ),
               ),
             ),
@@ -172,7 +174,7 @@ const headless = (app: App.Info) =>
     method: {
       id: headlessMethodID,
       type: "oauth",
-      label: "ChatGPT Pro/Plus (headless)",
+      label: "Codex device code (legacy)",
     },
     authorize: () =>
       Effect.gen(function* () {
@@ -254,10 +256,13 @@ export const OpenAIPlugin = define({
     yield* ctx.provider.transform((providers) => {
       const item = providers.get(Provider.ID.openai)
       if (!item) return
-      if (!chatgpt) return
-      const account = chatgpt.metadata?.accountID
+      const account = chatgpt?.metadata?.accountID
       providers.update(item.provider.id, (provider) => {
-        provider.settings = Provider.mergeOverlay(provider.settings, { baseURL: codexBaseURL })
+        provider.settings = Provider.mergeOverlay(provider.settings, {
+          transport: provider.settings?.transport ?? "websocket",
+          ...(chatgpt ? { baseURL: codexBaseURL } : {}),
+        })
+        if (!chatgpt) return
         provider.headers = Provider.mergeHeaders(provider.headers, {
           originator: "opencode",
           "x-codex-beta-features": "remote_compaction_v2",
@@ -270,7 +275,6 @@ export const OpenAIPlugin = define({
         // ChatGPT-plan tokens only authorize codex-eligible models, and the
         // subscription covers usage, so hide the rest and zero the cost.
         models.update(model.providerID, model.id, (draft) => {
-          draft.transport = models.provider.get(model.providerID)?.provider.transport ?? "websocket"
           if (!chatgpt) return
           if (Schema.is(Schema.Struct({ mode: Schema.Literal("pro") }))(draft.body?.reasoning)) {
             draft.enabled = false
@@ -296,15 +300,26 @@ export const OpenAIPlugin = define({
     yield* ctx.session.hook(
       "model.request",
       (evt) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           if (!chatgpt) return
           if (evt.baseURL && URL.canParse(evt.baseURL) && new URL(evt.baseURL).origin === "https://api.openai.com")
             evt.baseURL = codexBaseURL
+          const session = yield* ctx.session
+            .get({ sessionID: evt.sessionID })
+            .pipe(Effect.orElseSucceed(() => undefined))
           evt.headers.originator = "opencode"
-          evt.headers["session-id"] = evt.sessionID
+          // ChatGPT routes its prompt cache on this header, so children share the parent's.
+          evt.headers["session-id"] = session ? SessionAffinity.get(session) : evt.sessionID
         }),
       { providerID: Provider.ID.openai },
     )
+    // The ChatGPT backend rejects a requested output limit, and OpenAI counts one against rate limits.
+    const omitOutputLimit = (evt: SessionRequest) =>
+      Effect.sync(() => {
+        delete evt.options.maxTokens
+      })
+    for (const name of ["context", "compaction"] as const)
+      yield* ctx.session.hook(name, omitOutputLimit, { providerID: Provider.ID.openai })
     const refresh = () => loading.withPermit(load().pipe(Effect.andThen(ctx.provider.reload())))
     yield* bus.subscribe(Credential.Event.Switched).pipe(
       Stream.filter((event) => event.data.integrationID === Integration.ID.make("openai")),

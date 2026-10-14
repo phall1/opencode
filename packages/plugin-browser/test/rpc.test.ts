@@ -21,6 +21,10 @@ test("browser input bounds and optional fields survive the wire", () => {
   expect(() => decode({ type: "console", tabID, level: "verbose" })).toThrow()
   expect(() => decode({ type: "wait", tabID, condition: "load", timeoutMs: -1 })).toThrow()
   expect(() => decode({ type: "click", tabID: "another-tab", ref: "e1" })).toThrow()
+  expect(decode({ type: "evaluate", tabID, ref: "@e5", script: "(element) => element.id" })).toMatchObject({
+    ref: "@e5",
+  })
+  expect(() => decode({ type: "evaluate", tabID, ref: "button", script: "(element) => element.id" })).toThrow()
   expect(() => decode({ type: "network.list", tabID, resourceType: "imaginary" })).toThrow()
 })
 
@@ -55,6 +59,58 @@ test("network lifecycle and RPC version are explicit", () => {
   expect(Schema.decodeUnknownSync(Browser.Definition.methods.attach.output)("replaced")).toBe("replaced")
 })
 
+// Tool search matches query words as substrings of the description, folding a trailing "s"/"es".
+// Each phrase an agent is likely to search for when it wants the user to see a file must hit.
+test.each([
+  "show file to user",
+  "display file",
+  "open file for user",
+  "view result",
+  "present output",
+  "artifact",
+  "media",
+  "preview",
+  "image",
+  "images",
+  "screenshot",
+  "screenshots",
+  "png",
+  "jpeg",
+  "gif",
+  "chart",
+  "plot",
+  "photo",
+  "video",
+  "mp4",
+  "audio",
+  "pdf",
+  "document",
+  "html page",
+  "markdown",
+  "diagram",
+  "csv",
+  "table",
+  "font",
+  "svg",
+  "render",
+  "source code",
+])("browser.preview is found by searching %s", (query) => {
+  const preview = Browser.Operations.find((operation) => operation.name === "preview")!
+  const description = preview.description.toLowerCase()
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  for (const term of terms) {
+    const forms = [
+      term,
+      ...(term.endsWith("es") ? [term.slice(0, -2)] : []),
+      ...(term.endsWith("s") ? [term.slice(0, -1)] : []),
+    ]
+    expect(forms.some((form) => description.includes(form))).toBe(true)
+  }
+})
+
 test("network RPC is bounded bytes and does not add model tools", () => {
   expect(Browser.Operations.some((operation) => operation.name.startsWith("tunnel."))).toBe(false)
   expect(Schema.decodeUnknownSync(Browser.TunnelRead)({ data: "AAEC", eof: false }).data).toEqual(
@@ -67,4 +123,14 @@ test("network RPC is bounded bytes and does not add model tools", () => {
     }),
   ).toThrow()
   expect(() => Schema.decodeUnknownSync(Browser.TunnelTarget)({ host: "localhost", port: 0 })).toThrow()
+})
+
+test("browser ID patterns survive JSON Schema export for model tool definitions", () => {
+  const exported = (schema: Schema.Top) => {
+    const document = Schema.toJsonSchemaDocument(schema)
+    return Object.values(document.definitions)[0] ?? document.schema
+  }
+  expect(exported(Browser.TabID)).toMatchObject({ type: "string", pattern: "^tab_[a-f0-9-]{36}$" })
+  expect(exported(Browser.Ref)).toMatchObject({ type: "string", pattern: "^@?e[1-9][0-9]*$" })
+  expect(exported(Browser.FileID)).toMatchObject({ type: "string", pattern: "^file_[a-f0-9-]{36}$" })
 })

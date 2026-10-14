@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { withStatics } from "@opencode/schema/schema"
 import { Tool } from "@opencode/schema/tool"
 import {
   CacheHint,
@@ -8,18 +9,15 @@ import {
   JsonSchema,
   LanguageModelSchema,
   type LanguageModel,
+  ProviderMetadata,
   ProviderOptions,
   ReasoningEffort,
 } from "./options.js"
 import { ProviderID } from "./ids.js"
+import { Media } from "../media.js"
 
 export const MessageRole = Schema.Literals(["system", "user", "assistant", "tool"])
 export type MessageRole = Schema.Schema.Type<typeof MessageRole>
-
-export const ProviderMetadata = Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown)).annotate({
-  identifier: "LLM.ProviderMetadata",
-})
-export type ProviderMetadata = Schema.Schema.Type<typeof ProviderMetadata>
 
 const systemPartSchema = Schema.Struct({
   type: Schema.Literal("text"),
@@ -31,7 +29,7 @@ export type SystemPart = Schema.Schema.Type<typeof systemPartSchema>
 
 const makeSystemPart = (text: string): SystemPart => ({ type: "text", text })
 
-export const SystemPart = Object.assign(systemPartSchema, {
+export const SystemPart = withStatics(systemPartSchema, {
   make: makeSystemPart,
   content: (input?: string | SystemPart | ReadonlyArray<SystemPart>) => {
     if (input === undefined) return []
@@ -50,8 +48,7 @@ export type TextPart = Schema.Schema.Type<typeof TextPart>
 
 export const MediaPart = Schema.Struct({
   type: Schema.Literal("media"),
-  mediaType: Schema.String,
-  data: Schema.Union([Schema.String, Schema.Uint8Array]),
+  media: Media.AssetSchema,
   filename: Schema.optional(Schema.String),
   cache: Schema.optional(CacheHint),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
@@ -80,7 +77,7 @@ const toolResultValueSchema = Schema.Union([
 export type ToolResultValue = Schema.Schema.Type<typeof toolResultValueSchema>
 const isToolResultValue = Schema.is(toolResultValueSchema)
 
-export const ToolResultValue = Object.assign(toolResultValueSchema, {
+export const ToolResultValue = withStatics(toolResultValueSchema, {
   is: isToolResultValue,
   make: (value: unknown, type: ToolResultValue["type"] = "json"): ToolResultValue => {
     if (isToolResultValue(value)) return value
@@ -94,7 +91,7 @@ export interface ToolOutput {
   readonly content: ReadonlyArray<Tool.Content>
 }
 
-export const ToolOutput = Object.assign(
+export const ToolOutput = withStatics(
   Schema.Struct({
     structured: Schema.Unknown,
     content: Schema.Array(Tool.Content),
@@ -131,7 +128,7 @@ const toolResultText = (value: unknown) => {
   }
 }
 
-export const ToolCallPart = Object.assign(
+export const ToolCallPart = withStatics(
   Schema.Struct({
     type: Schema.Literal("tool-call"),
     id: Schema.String,
@@ -149,7 +146,7 @@ export const ToolCallPart = Object.assign(
 )
 export type ToolCallPart = Schema.Schema.Type<typeof ToolCallPart>
 
-export const ToolResultPart = Object.assign(
+export const ToolResultPart = withStatics(
   Schema.Struct({
     type: Schema.Literal("tool-result"),
     id: Schema.String,
@@ -213,7 +210,7 @@ const compactionPartSchema = Schema.Struct({
   )
   .annotate({ identifier: "LLM.Content.Compaction" })
 export type CompactionPart = typeof compactionPartSchema.Type
-export const CompactionPart = Object.assign(compactionPartSchema, {
+export const CompactionPart = withStatics(compactionPartSchema, {
   make: (input: Omit<CompactionPart, "type" | "encrypted" | "text"> & CompactionContent): CompactionPart =>
     Schema.decodeUnknownSync(compactionPartSchema)({ type: "compaction", ...input }),
 })
@@ -254,6 +251,12 @@ export namespace Message {
   }
 
   export const text = (value: string): ContentPart => ({ type: "text", text: value })
+
+  export const media = (asset: Media.Asset, options?: Omit<MediaPart, "type" | "media">): MediaPart => ({
+    type: "media",
+    media: asset,
+    ...options,
+  })
 
   export const content = (input: ContentInput) =>
     typeof input === "string" ? [text(input)] : Array.isArray(input) ? [...input] : [input]
@@ -324,7 +327,7 @@ export type ToolNamespaceEntryInput = ToolNamespaceInput & { readonly type: "nam
 
 export const ToolNamespace: Schema.Codec<ToolNamespace> & {
   readonly make: (input: ToolNamespace | ToolNamespaceInput) => ToolNamespace
-} = Object.assign(
+} = withStatics(
   Schema.Struct({
     type: Schema.Literal("namespace"),
     name: Schema.String,
@@ -344,7 +347,7 @@ export type ToolEntry = ToolDefinition | ToolNamespace
 export type ToolEntryInput = ToolDefinition.Input | ToolNamespaceEntryInput
 export const ToolEntry: Schema.Codec<ToolEntry> & {
   readonly make: (input: ToolEntryInput) => ToolEntry
-} = Object.assign(
+} = withStatics(
   Schema.Union([ToolDefinition, ToolNamespace]).pipe(
     Schema.toTaggedUnion("type"),
     Schema.annotate({ identifier: "LLM.ToolEntry" }),

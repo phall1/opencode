@@ -3,7 +3,7 @@ export * as SubagentTool from "./subagent.js"
 import { ToolFailure } from "@opencode/ai"
 import type { Context } from "@opencode/plugin/effect/plugin"
 import type { SessionHooks } from "@opencode/plugin/effect/session"
-import { Effect, Schema } from "effect"
+import { Effect, Predicate, Schema } from "effect"
 import { Agent } from "../../agent.js"
 import { Config } from "../../config.js"
 import { Job } from "../../job.js"
@@ -70,7 +70,7 @@ export const Plugin = {
     const config = yield* Config.Service
     const permission = yield* Permission.Service
     const models = yield* Model.Service
-    const subagents = yield* SubagentJob.make
+    const subagents = yield* SubagentJob.Service
 
     const resolveModel = Effect.fn("SubagentTool.resolveModel")(function* (input: string) {
       const ref = yield* Effect.try({
@@ -267,6 +267,17 @@ export const Plugin = {
         }),
       )
       .pipe(Effect.orDie)
+
+    yield* ctx.tool.hook("execute.before", (event) =>
+      Effect.sync(() => {
+        if (event.tool !== name || !Predicate.isObject(event.input)) return
+        if (event.input.model !== "" && event.input.sessionID !== "") return
+        const input = { ...event.input }
+        if (input.model === "") delete input.model
+        if (input.sessionID === "") delete input.sessionID
+        event.input = input
+      }),
+    )
 
     const hook = (event: SessionHooks["context"]) =>
       Effect.gen(function* () {

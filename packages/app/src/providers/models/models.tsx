@@ -1,5 +1,4 @@
 import { type Accessor, createMemo } from "solid-js"
-import { DateTime } from "luxon"
 import { filter, firstBy, flat, groupBy, mapValues, pipe, uniqueBy, values } from "remeda"
 import { createSimpleContext } from "@opencode/ui/context"
 import { useProviders } from "@/providers/catalog/providers"
@@ -8,7 +7,11 @@ import { useGlobal } from "@/runtime/server/runtime"
 export type ModelKey = { providerID: string; modelID: string }
 
 type Visibility = "show" | "hide"
+
 const RECENT_LIMIT = 5
+
+// luxon's diffNow().as("months") used an average month; keep the same window.
+const sixMonths = 6 * 30.436875 * 24 * 60 * 60 * 1000
 
 function modelKey(model: ModelKey) {
   return `${model.providerID}:${model.modelID}`
@@ -29,27 +32,24 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
     ),
   )
 
+  // Release dates as epoch ms; an unparseable date is NaN and never counts as recent.
   const release = createMemo(
     () =>
       new Map(
-        available().map((model) => {
-          const parsed = DateTime.fromISO(model.release_date)
-          return [modelKey({ providerID: model.provider.id, modelID: model.id }), parsed] as const
-        }),
+        available().map(
+          (model) => [modelKey({ providerID: model.provider.id, modelID: model.id }), Date.parse(model.release_date)] as const,
+        ),
       ),
   )
 
   const latest = createMemo(() =>
     pipe(
       available(),
-      filter(
-        (x) =>
-          Math.abs(
-            (release().get(modelKey({ providerID: x.provider.id, modelID: x.id })) ?? DateTime.invalid("invalid"))
-              .diffNow()
-              .as("months"),
-          ) < 6,
-      ),
+      filter((x) => {
+        const released = release().get(modelKey({ providerID: x.provider.id, modelID: x.id })) ?? NaN
+
+        return Math.abs(Date.now() - released) < sixMonths
+      }),
       groupBy((x) => x.provider.id),
       mapValues((models) =>
         pipe(
@@ -59,6 +59,7 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
           (groups) =>
             groups.flatMap((g) => {
               const first = firstBy(g, [(x) => x.release_date, "desc"])
+
               return first ? [{ modelID: first.id, providerID: first.provider.id }] : []
             }),
         ),
@@ -72,7 +73,9 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
 
   const visibility = createMemo(() => {
     const map = new Map<string, Visibility>()
+
     for (const item of store.user) map.set(`${item.providerID}:${item.modelID}`, item.visibility)
+
     return map
   })
 
@@ -88,22 +91,28 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
 
   function update(model: ModelKey, state: Visibility) {
     const index = store.user.findIndex((x) => x.modelID === model.modelID && x.providerID === model.providerID)
+
     if (index >= 0) {
       setStore("user", index, (current) => ({ ...current, visibility: state }))
+
       return
     }
+
     setStore("user", store.user.length, { ...model, visibility: state })
   }
 
   const visible = (model: ModelKey) => {
     const key = modelKey(model)
     const state = visibility().get(key)
+
     if (state === "hide") return false
+
     if (state === "show") return true
+
     if (latestSet().has(key)) return true
-    const date = release().get(key)
-    if (!date?.isValid) return true
-    return false
+
+    // Models without a parseable release date stay visible.
+    return !Number.isFinite(release().get(key) ?? NaN)
   }
 
   const setVisibility = (model: ModelKey, state: boolean) => {
@@ -112,6 +121,7 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
 
   const push = (model: ModelKey) => {
     const uniq = uniqueBy([model, ...store.recent], (x) => `${x.providerID}:${x.modelID}`)
+
     if (uniq.length > RECENT_LIMIT) uniq.pop()
     setStore("recent", uniq)
   }
@@ -121,10 +131,13 @@ const createModelsController = (directory: Accessor<string | undefined>) => {
 
   const setVariant = (model: ModelKey, value: string | undefined) => {
     const key = variantKey(model)
+
     if (!store.variant) {
       setStore("variant", { [key]: value ?? "default" })
+
       return
     }
+
     setStore("variant", key, value ?? "default")
   }
 

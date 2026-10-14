@@ -12,7 +12,7 @@ import { Provider } from "@opencode/core/provider"
 import { expect } from "bun:test"
 import { Clock, Deferred, Effect, Fiber, Layer, Schedule, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
@@ -319,7 +319,7 @@ it.effect("keeps near-expiry keys usable and requires a new login after expiry",
         expires: (yield* Clock.currentTimeMillis) + 120_000,
       }),
     })
-    const connection = { type: "credential" as const, id: saved.id, label: saved.label }
+    const connection = { type: "credential" as const, method: "oauth" as const, id: saved.id, label: saved.label }
     expect(yield* test.integrations.connection.resolve(connection)).toEqual(saved.value)
     yield* TestClock.adjust("2 minutes")
     const error = yield* test.integrations.connection.resolve(connection).pipe(Effect.flip)

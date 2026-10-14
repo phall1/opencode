@@ -7,6 +7,7 @@ import { Spinner } from "../../component/spinner"
 import { usePlugin } from "../../plugin/context"
 import { DialogSelect, type DialogSelectOption } from "../../ui/dialog-select"
 import { useDialog } from "../../ui/dialog"
+import { errorMessage } from "../../util/error"
 
 const id = "opencode.plugins"
 
@@ -22,11 +23,7 @@ type Entry =
       readonly error?: string
     }
 
-export function PluginsDialog(props: {
-  context: Plugin.Context
-  plugins: ReturnType<typeof usePlugin>
-  server?: () => readonly PluginInfo[]
-}) {
+export function PluginsDialog(props: { context: Plugin.Context; plugins: ReturnType<typeof usePlugin> }) {
   const dialog = useDialog()
   const [locked, setLocked] = createSignal(false)
   const [checking, setChecking] = createSignal(false)
@@ -35,7 +32,7 @@ export function PluginsDialog(props: {
   const [showInternal, setShowInternal] = createSignal(false)
   const [pending, setPending] = createSignal<readonly string[]>([])
   const [server, { refetch, mutate }] = createResource(
-    () => (props.server ? undefined : (props.context.location ?? props.context.data.location.default())),
+    () => props.context.location ?? props.context.data.location.default(),
     (location) => props.context.client.plugin.list({ location }).then((result) => result.data),
   )
   onMount(() => dialog.setSize("large"))
@@ -68,7 +65,7 @@ export function PluginsDialog(props: {
         status: plugin.status,
         error: plugin.status === "failed" ? plugin.error : undefined,
       }))
-    const serverEntries: Entry[] = (props.server?.() ?? server() ?? []).map((plugin) => ({
+    const serverEntries: Entry[] = (server() ?? []).map((plugin) => ({
       key: `server:${plugin.id ?? source(plugin, props.context)}`,
       runtime: "server" as const,
       internal: plugin.source.type === "builtin",
@@ -98,14 +95,14 @@ export function PluginsDialog(props: {
         footer: updating(entry) ? "updating" : footer(entry),
         footerColor:
           status(entry) === "failed"
-            ? props.context.theme.text.feedback.error.default
+            ? props.context.theme.text.feedback.error.base
             : outdated(entry)
-              ? props.context.theme.text.feedback.info.default
-              : props.context.theme.text.subdued,
+              ? props.context.theme.text.feedback.info.base
+              : props.context.theme.text.muted,
         gutter: updating(entry)
           ? (color) => <Spinner color={color} />
           : status(entry) === "failed"
-            ? () => <text fg={props.context.theme.text.feedback.error.default}>x</text>
+            ? () => <text fg={props.context.theme.text.feedback.error.base}>x</text>
             : undefined,
       }),
     ),
@@ -134,7 +131,7 @@ export function PluginsDialog(props: {
       .catch((cause) => {
         props.context.ui.toast.show({
           variant: "error",
-          message: cause instanceof Error ? cause.message : String(cause),
+          message: errorMessage(cause),
         })
       })
       .finally(() => setLocked(false))
@@ -152,7 +149,7 @@ export function PluginsDialog(props: {
       .catch((cause) => {
         props.context.ui.toast.show({
           variant: "error",
-          message: cause instanceof Error ? cause.message : String(cause),
+          message: errorMessage(cause),
         })
       })
       .finally(() => setPending((keys) => keys.filter((key) => key !== entry.key)))
@@ -173,7 +170,7 @@ export function PluginsDialog(props: {
       .catch((cause) => {
         props.context.ui.toast.show({
           variant: "error",
-          message: cause instanceof Error ? cause.message : String(cause),
+          message: errorMessage(cause),
         })
       })
       .finally(() => setChecking(false))
@@ -249,10 +246,10 @@ export function PluginsDialog(props: {
             footer={
               <Show when={pluginError(focusedEntry()) && !focusedTui()}>
                 <text>
-                  <span style={{ fg: props.context.theme.text.default }}>
+                  <span style={{ fg: props.context.theme.text.base }}>
                     <b>enter</b>
                   </span>
-                  <span style={{ fg: props.context.theme.text.subdued }}> view error</span>
+                  <span style={{ fg: props.context.theme.text.muted }}> view error</span>
                 </text>
               </Show>
             }

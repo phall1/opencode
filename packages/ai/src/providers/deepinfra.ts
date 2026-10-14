@@ -47,7 +47,12 @@ export const configure = (input: LanguageModelOptions = {}) => {
     model: (modelID: string | ModelID) =>
       configured.model<OpenAIProviderOptionsInput>({
         id: modelID,
-        compatibility: { maxTokensField: "max_tokens", reasoningField: "reasoning_content", supportsStore: false, supportsPromptCacheKey: true },
+        compatibility: {
+          maxTokensField: "max_tokens",
+          reasoningField: "reasoning_content",
+          supportsStore: false,
+          supportsPromptCacheKey: true,
+        },
       }),
     configure,
   }
@@ -62,7 +67,7 @@ export const model: ProviderPackage.Definition<Settings, OpenAIProviderOptionsIn
   configure({
     apiKey,
     baseURL,
-    headers: headers === undefined ? undefined : { ...headers },
-    http: body === undefined ? undefined : { body: { ...body } },
+    headers,
+    http: body === undefined ? undefined : { body },
     providerOptions,
   }).model(modelID)

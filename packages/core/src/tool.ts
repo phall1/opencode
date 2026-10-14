@@ -39,6 +39,7 @@ type Data = {
 }
 
 export interface Interface extends State.Transformable<Editor> {
+  readonly list: () => Effect.Effect<ReadonlyArray<Tool.Info & { readonly id: string }>>
   readonly snapshot: (permissions?: Permission.Ruleset) => Effect.Effect<Snapshot>
 }
 
@@ -220,6 +221,7 @@ const layer = Layer.effect(
     return Service.of({
       transform: state.transform,
       reload: state.reload,
+      list: () => Effect.sync(() => Array.from(state.get().tools.values())),
       snapshot: Effect.fn("Tool.snapshot")((permissions) =>
         Effect.sync(() => {
           const data = state.get()
@@ -306,7 +308,7 @@ function registrationError(tool: Tool.Info) {
     if (error) return error
   }
   const name = normalizedName(tool)
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) return new RegistrationError({ name, message: `Invalid tool name: ${name}` })
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) return new RegistrationError({ name, message: `Invalid tool name: ${name}` })
   const id = effectiveName(tool)
   if (tool.options?.codemode === false && id === "execute")
     return new RegistrationError({ name: id, message: 'Tool name "execute" is reserved for CodeMode' })
@@ -319,7 +321,7 @@ function registrationError(tool: Tool.Info) {
 }
 
 function namespaceError(name: string) {
-  if (name.split(".").every((segment) => /^[A-Za-z0-9_-]{1,64}$/.test(segment))) return
+  if (name.split(".").every((segment) => /^[A-Za-z0-9_-]+$/.test(segment))) return
   return new RegistrationError({ name, message: `Invalid tool namespace: ${JSON.stringify(name)}` })
 }
 

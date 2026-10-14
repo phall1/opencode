@@ -236,7 +236,7 @@ const setup = Effect.gen(function* () {
     db,
     bus,
     session,
-    instructions: yield* instructionBuiltIns.load(sessionID),
+    instructions: yield* instructionBuiltIns.load(),
     instances: Instance.Service.of({
       // Generation only exercises the Location's model context.
       provide: () =>
@@ -275,6 +275,7 @@ it.effect(
         assistantMessageID: settledAssistant,
         agent: Agent.ID.make("build"),
         model: { id: ID.make("generate-model"), providerID: Provider.ID.make("test") },
+        started: 0,
       })
       yield* bus.publish(SessionEvent.Text.Started, {
         sessionID,
@@ -293,6 +294,7 @@ it.effect(
         assistantMessageID: activeAssistant,
         agent: Agent.ID.make("build"),
         model: { id: ID.make("generate-model"), providerID: Provider.ID.make("test") },
+        started: 0,
       })
       yield* bus.publish(SessionEvent.Tool.Input.Started, {
         sessionID,

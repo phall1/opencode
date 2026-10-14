@@ -127,14 +127,16 @@ const layer = Layer.effect(
       yield* mcpTools.flush
       const agent = yield* agents.select(session.agent)
       if (!agent.info) return yield* new AgentNotFoundError({ sessionID: session.id, agent: session.agent ?? agent.id })
+      // Session permissions narrow discovery the same way they narrow the tool snapshot.
+      const permissions = Permission.merge(agent.info.permissions, session.permissions ?? [])
       const loaded = yield* Effect.all(
         {
-          tools: registry.snapshot(Permission.merge(agent.info.permissions, session.permissions ?? [])),
-          builtins: builtins.load(sessionID),
+          tools: registry.snapshot(permissions),
+          builtins: builtins.load(),
           discovery: discovery.load(),
-          skills: skillInstructions.load(agent),
+          skills: skillInstructions.load(permissions),
           references: referenceInstructions.load(),
-          mcp: mcpInstructions.load(agent),
+          mcp: mcpInstructions.load(permissions),
           entries: entries.load(sessionID),
         },
         { concurrency: "unbounded" },
@@ -142,13 +144,16 @@ const layer = Layer.effect(
       return {
         session,
         agent: { ...agent, info: agent.info },
+        // Ordered from most to least shared across sessions so the baseline stays a reusable
+        // prompt-cache prefix: user-level catalog and guidance, then project instructions, then
+        // the date and environment, which vary by day and directory.
         instructions: Instructions.combine([
-          loaded.builtins,
           CodeModeInstructions.make(loaded.tools.codeModeCatalog),
-          loaded.discovery,
-          loaded.skills,
-          loaded.references,
           loaded.mcp,
+          loaded.references,
+          loaded.skills,
+          loaded.discovery,
+          loaded.builtins,
           loaded.entries,
         ]),
         tools: loaded.tools,

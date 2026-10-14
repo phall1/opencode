@@ -25,6 +25,8 @@ export const docsSections: DocsSection[] = [
         items: [
           { title: "Intro", slug: "index" },
           { title: "Config", slug: "config" },
+          { title: "Migrate from V1", slug: "migrate-v1" },
+          { title: "Troubleshooting", slug: "troubleshooting" },
         ],
       },
       {
@@ -47,15 +49,10 @@ export const docsSections: DocsSection[] = [
           { title: "Tools", slug: "tools" },
           { title: "MCP servers", slug: "mcp-servers" },
           { title: "Permissions", slug: "permissions" },
+          { title: "Policies", slug: "policies" },
           { title: "Instructions", slug: "instructions" },
           { title: "Sharing", slug: "sharing" },
           { title: "Warming", slug: "warming" },
-        ],
-      },
-      {
-        items: [
-          { title: "Migrate from V1", slug: "migrate-v1" },
-          { title: "Troubleshooting", slug: "troubleshooting" },
         ],
       },
     ],
@@ -69,7 +66,7 @@ export const docsSections: DocsSection[] = [
         items: [
           { title: "Intro", slug: "cli" },
           { title: "TUI", slug: "cli/tui" },
-          { title: "Config", slug: "cli/config" },
+          { title: "Settings", slug: "cli/config" },
           { title: "Web", slug: "cli/web" },
           { title: "Providers", slug: "cli/providers" },
           { title: "Commands", slug: "cli/commands" },
@@ -140,8 +137,29 @@ export const docsSections: DocsSection[] = [
         items: [
           { title: "Intro", slug: "console" },
           { title: "Models", slug: "console/models" },
-          { title: "Websearch", slug: "console/websearch" },
+          { title: "Providers", slug: "console/providers" },
+          { title: "Web Search", slug: "console/websearch" },
           { title: "Go", slug: "console/go" },
+        ],
+      },
+      {
+        title: "Workspace",
+        items: [
+          { title: "Basics", slug: "console/workspaces" },
+          { title: "Members", slug: "console/members" },
+          { title: "SSO", slug: "console/sso" },
+          { title: "SCIM", slug: "console/scim" },
+          { title: "Budgets", slug: "console/budgets" },
+          { title: "Billing", slug: "console/billing" },
+        ],
+      },
+      {
+        title: "API",
+        items: [
+          { title: "Overview", slug: "console/api" },
+          { title: "Inference", slug: "console/api/inference" },
+          { title: "Providers", slug: "console/api/providers" },
+          { title: "Budgets", slug: "console/api/budgets" },
         ],
       },
     ],

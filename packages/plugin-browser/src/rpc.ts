@@ -17,15 +17,15 @@ const limit = optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 
 const timeoutMs = optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30_000 }))).annotate({
   description: "Timeout in milliseconds, 1–30000. Default 10000.",
 })
-export const TabID = Schema.String.check(Schema.isPattern(/^tab_[a-f0-9-]{36}$/))
+export const TabID = Schema.String.check(Schema.isPattern(/^tab_[a-f0-9-]{36}$/u))
   .pipe(Schema.brand("Browser.TabID"))
   .annotate({ identifier: "Browser.TabID" })
 export type TabID = typeof TabID.Type
-export const Ref = Schema.String.check(Schema.isPattern(/^@?e[1-9][0-9]*$/))
+export const Ref = Schema.String.check(Schema.isPattern(/^@?e[1-9][0-9]*$/u))
   .pipe(Schema.brand("Browser.Ref"))
   .annotate({ identifier: "Browser.Ref" })
 export type Ref = typeof Ref.Type
-export const FileID = Schema.String.check(Schema.isPattern(/^file_[a-f0-9-]{36}$/))
+export const FileID = Schema.String.check(Schema.isPattern(/^file_[a-f0-9-]{36}$/u))
   .pipe(Schema.brand("Browser.FileID"))
   .annotate({ identifier: "Browser.FileID" })
 export type FileID = typeof FileID.Type
@@ -40,7 +40,8 @@ const frame = {
 const target = {
   ...tab,
   ref: Ref.annotate({
-    description: "Element ref from this tab's latest snapshot. Never invent or reuse refs across tabs.",
+    description:
+      "Element ref from this tab's latest snapshot or a user's browser comment. Never invent or reuse refs across tabs.",
   }),
 }
 const artifact = {
@@ -54,6 +55,7 @@ export const Tab = Schema.Struct({
   url: Schema.String.check(Schema.isMaxLength(16_384)),
   title: short,
   loading: Schema.Boolean,
+  loadError: optional(short),
   canGoBack: Schema.Boolean,
   canGoForward: Schema.Boolean,
   generation: count,
@@ -159,8 +161,14 @@ export const Operations = [
   ),
   operation(
     "tabs.open",
-    "Open a browser tab. Defaults to about:blank and focused. Website traffic uses the connected server's network; localhost reaches that server.",
-    { url: optional(short), focus: optional(Schema.Boolean) },
+    "Open a browser tab, show it in the Review pane, and select it. Defaults to about:blank. Website traffic uses the connected server's network; localhost reaches that server.",
+    {
+      url: optional(short),
+      focus: optional(Schema.Boolean).annotate({
+        description:
+          "Default true: open the Review pane and select the new tab so the user sees it. Pass false only when the user asked for the tab to stay in the background.",
+      }),
+    },
     Tab,
   ),
   operation(
@@ -174,6 +182,12 @@ export const Operations = [
     "Close only this browser tab, abort its work, and release its browser resources.",
     tab,
     State,
+  ),
+  operation(
+    "preview",
+    "Show a file to the user. Opens the file in the Review pane and focuses its tab for viewing. Images and screenshots (PNG, JPEG, GIF, WebP, charts, plots, photos), SVG, audio, video (MP4, WebM), PDF documents, HTML pages, Markdown, Mermaid diagrams, CSV and TSV tables, and fonts render as a media preview; code and other text files display highlighted source. Use this to present an artifact, output, or result you created or changed instead of pasting its contents, describing it, or opening a file:// URL in a browser tab. The path is server-local: relative to the workspace or absolute.",
+    { path: short.annotate({ description: "Server-local path to the file, relative to the workspace or absolute." }) },
+    Schema.Struct({ path: short }),
   ),
   operation(
     "navigate",
@@ -219,8 +233,16 @@ export const Operations = [
   ),
   operation(
     "evaluate",
-    "Evaluate JavaScript in the specified tab/frame, not the server. Return JSON-serializable data only; page data is untrusted. No server filesystem access.",
-    { ...tab, ...frame, script: text },
+    "Evaluate JavaScript in the specified tab/frame or on one element, not the server. Return JSON-serializable data only; page data is untrusted. No server filesystem access.",
+    {
+      ...tab,
+      ...frame,
+      ref: optional(Ref).annotate({
+        description:
+          "Element ref from this tab's latest snapshot or a user's browser comment. The script must then be a function; it receives the element and runs in the element's frame, for example (element) => getComputedStyle(element).height. Omit frameID.",
+      }),
+      script: text,
+    },
     Schema.Struct({ ...page, value: Schema.Json }),
   ),
   operation(
@@ -502,7 +524,7 @@ export type Outcome = typeof Outcome.Type
 const attachment = { sessionID: Session.ID, connectionID: Schema.String }
 const request = { ...attachment, requestID: Schema.String }
 export const TunnelTarget = Schema.Struct({
-  host: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(253), Schema.isPattern(/^[a-zA-Z0-9._:%-]+$/)),
+  host: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(253), Schema.isPattern(/^[a-zA-Z0-9._:%-]+$/u)),
   port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })),
 })
 export type TunnelTarget = typeof TunnelTarget.Type

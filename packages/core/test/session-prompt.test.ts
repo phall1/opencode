@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import type { FileSystem } from "@opencode/core/filesystem"
 import { DateTime, Effect, Fiber, Layer, LayerMap, Schema, Stream } from "effect"
 import path from "path"
 import { pathToFileURL } from "url"
@@ -83,7 +84,7 @@ const locations = makeGlobalNode({
               restore: () => Effect.void,
             }),
             Layer.mock(Plugin.Service, { awaitActivation: Effect.void }),
-          ).pipe(Layer.fresh) as unknown as Layer.Layer<LocationServices>,
+          ).pipe(Layer.fresh) as unknown as Layer.Layer<LocationServices, FileSystem.DirectoryNotFoundError>,
       )
     }),
   ),
@@ -501,8 +502,31 @@ describe("Session.prompt", () => {
 
       expect(error).toMatchObject({
         _tag: "Session.AttachmentError",
-        uri,
-        message: "Invalid attachment data URL",
+        uri: "image.png",
+        message: "Invalid attachment data URL: image.png",
+      })
+    }),
+  )
+
+  it.effect("rejects oversized inline attachments without echoing their bytes", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* Session.Service
+      const uri = `data:application/octet-stream;base64,${Buffer.alloc(20 * 1024 * 1024 + 1).toString("base64")}`
+
+      const error = yield* session
+        .prompt({
+          sessionID,
+          text: "Inspect this",
+          files: [{ uri }],
+          resume: false,
+        })
+        .pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: "Session.AttachmentError",
+        uri: "inline attachment",
+        message: "Attachment exceeds the 20971520 byte limit: inline attachment",
       })
     }),
   )

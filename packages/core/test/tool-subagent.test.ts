@@ -29,7 +29,9 @@ import { SessionInbox } from "@opencode/core/session/inbox"
 import { SessionMessage } from "@opencode/core/session/message"
 import { SessionRunnerModel } from "@opencode/core/session/runner/model"
 import { SessionStore } from "@opencode/core/session/store"
+import { SubagentJob } from "@opencode/core/session/subagent-job"
 import { Plugin } from "@opencode/core/plugin"
+import { PluginHooks } from "@opencode/core/plugin/hooks"
 import { PluginSupervisor } from "@opencode/core/plugin/supervisor"
 import { Permission } from "@opencode/core/permission"
 import { SubagentTool } from "@opencode/core/tool/plugin/subagent"
@@ -76,6 +78,7 @@ const executionNode = makeGlobalNode({
           assistantMessageID,
           agent: Agent.ID.make("reviewer"),
           model: childModel,
+          started: 0,
         })
         yield* bus.publish(SessionEvent.Text.Started, {
           sessionID,
@@ -111,8 +114,23 @@ const executionNode = makeGlobalNode({
 
 const subagentPluginSupervisor = makeLocationNode({
   name: "test/subagent-plugins",
-  layer: Layer.effectDiscard(registerToolPlugin(SubagentTool.Plugin)),
-  deps: [Agent.node, Config.node, Model.node, Permission.node, Session.node, Job.node, Tool.node],
+  layer: Layer.effectDiscard(
+    Effect.gen(function* () {
+      const hooks = yield* PluginHooks.Service
+      yield* registerToolPlugin(SubagentTool.Plugin, {}, (name, callback) => hooks.register("tool", name, callback))
+    }),
+  ),
+  deps: [
+    Agent.node,
+    Config.node,
+    Model.node,
+    Permission.node,
+    Session.node,
+    Job.node,
+    SubagentJob.node,
+    Tool.node,
+    PluginHooks.node,
+  ],
 })
 
 const nodes = LayerNode.group([
@@ -406,7 +424,7 @@ describe("SubagentTool", () => {
               type: "tool-call",
               id: "call-subagent",
               name: SubagentTool.name,
-              input: { agent: "reviewer", description: "review", prompt: "review this" },
+              input: { agent: "reviewer", description: "review", prompt: "review this", model: "", sessionID: "" },
             },
           })
 
@@ -483,6 +501,7 @@ describe("SubagentTool", () => {
                 description: "follow up",
                 prompt: "continue this",
                 sessionID: childID,
+                model: "",
               },
             },
           })
@@ -599,6 +618,28 @@ describe("SubagentTool", () => {
               message: `Subagent session not found: ${missing}`,
             },
           })
+          expect(
+            yield* executeTool(registry, {
+              sessionID: parent.id,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "call-malformed-child-id",
+                name: SubagentTool.name,
+                input: { agent: "reviewer", description: "follow up", prompt: "continue", sessionID: "placeholder" },
+              },
+            }),
+          ).toMatchObject({
+            status: "error",
+            error: { message: expect.stringContaining('sessionID: Expected a string starting with "ses"') },
+          })
+          expect(yield* call(parent.id, "call-parent-id")).toEqual({
+            status: "error",
+            error: {
+              type: "tool.execution",
+              message: `Session ${parent.id} is not a child of the current session`,
+            },
+          })
           expect(yield* call(unrelated.id, "call-unrelated-child")).toEqual({
             status: "error",
             error: {
@@ -654,7 +695,7 @@ describe("SubagentTool", () => {
             })
 
           // The requested model beats the agent's configured model.
-          const spawned = yield* call("call-override", { model: "test/override#fast" })
+          const spawned = yield* call("call-override", { model: "test/override#fast", sessionID: "" })
           expect(spawned).toMatchObject({ status: "completed", metadata: { status: "completed" } })
           const child = yield* sessions.get(outputSessionID(spawned.metadata))
           expect(child).toMatchObject({ agent: "reviewer", model: overrideModel })

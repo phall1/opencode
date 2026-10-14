@@ -52,6 +52,12 @@ import type { SessionInbox } from "@opencode/schema/session-inbox"
 import { batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 
 export type DataSessionStatus = "idle" | "running"
+/**
+ * Where a pending user prompt stands relative to the runner: `starting` is promoted at the next idle boundary,
+ * `steering` waits for the next step boundary of an execution that already delivered input, `stranded` outlived an
+ * execution that ended without delivering it, and `queued` waits for every steer to drain.
+ */
+export type DataPendingStatus = "starting" | "steering" | "stranded" | "queued"
 type OpenCodeEventMap = { [Type in OpenCodeEvent["type"]]: Extract<OpenCodeEvent, { type: Type }> }
 
 export type CreateDataInput = {
@@ -592,12 +598,6 @@ export function createData(config: CreateDataInput) {
 
   function handleEvent(event: OpenCodeEvent) {
     switch (event.type) {
-      case "location.shutdown": {
-        if (!event.location) return
-        result.location.invalidate(event.location)
-        refresh(() => result.location.sync(event.location))
-        return
-      }
       case "server.connected": {
         const updates = new Map<string, DataSessionStatus | undefined>()
         activeUpdates = updates
@@ -853,6 +853,7 @@ export function createData(config: CreateDataInput) {
             existing.finish = undefined
             existing.rawFinish = undefined
             existing.providerState = undefined
+            existing.time.created = event.data.started
             existing.time.streamed = undefined
             existing.time.completed = undefined
             if (event.data.snapshot) existing.snapshot = { ...existing.snapshot, start: event.data.snapshot }
@@ -871,7 +872,7 @@ export function createData(config: CreateDataInput) {
             metadata: event.metadata,
             content: [],
             snapshot: event.data.snapshot ? { start: event.data.snapshot } : undefined,
-            time: { created: event.created },
+            time: { created: event.data.started },
           })
         })
         return
@@ -1046,8 +1047,22 @@ export function createData(config: CreateDataInput) {
               : event.type === "session.execution.failed"
                 ? "failed"
                 : "interrupted",
+          ...(event.type === "session.execution.failed" ? { error: event.data.error } : {}),
           time: { created: event.created },
         })
+        if (
+          store.session.message[event.data.sessionID]?.some(
+            (item) =>
+              item.type === "assistant" &&
+              item.content.some(
+                (part) =>
+                  part.type === "tool" && (part.state.status === "streaming" || part.state.status === "running"),
+              ),
+          )
+        ) {
+          sync.invalidate(`session.message:${event.data.sessionID}`)
+          refresh(() => result.session.message.sync(event.data.sessionID))
+        }
         // An event can overtake the first read; queue a revalidation when that read is still active.
         if (!store.session.info[event.data.sessionID] && !sync.has(`session:${event.data.sessionID}`)) return
         result.session.invalidate(event.data.sessionID)
@@ -1371,6 +1386,11 @@ export function createData(config: CreateDataInput) {
       status(sessionID: string) {
         return store.session.active[sessionID] ?? "idle"
       },
+      active() {
+        return Object.entries(store.session.active).flatMap(([sessionID, status]) =>
+          status === "running" ? [sessionID] : [],
+        )
+      },
       // Inputs are the pending user and synthetic items; compactions are control items.
       input: {
         list(sessionID: string) {
@@ -1387,6 +1407,23 @@ export function createData(config: CreateDataInput) {
       pending: {
         list(sessionID: string) {
           return store.session.pending[sessionID] ?? []
+        },
+        // An execution's idle boundary promotes every pending steer at once, so a steer only waits behind work
+        // once the current execution has delivered input.
+        status(sessionID: string, inboxID: string): DataPendingStatus | undefined {
+          const pending = store.session.pending[sessionID] ?? []
+          const item = pending.find((entry) => entry.id === inboxID && entry.type === "user")
+          if (!item) return undefined
+          if (item.delivery === "queue") return "queued"
+          const messages = store.session.message[sessionID] ?? []
+          const boundary = messages.findLastIndex((entry) => entry.type === "idle")
+          if ((store.session.active[sessionID] ?? "idle") === "idle")
+            return boundary >= 0 && item.time.created <= messages[boundary].time.created ? "stranded" : "starting"
+          return messages
+            .slice(boundary + 1)
+            .some((entry) => entry.type === "user" && !pending.some((other) => other.id === entry.id))
+            ? "steering"
+            : "starting"
         },
         sync(sessionID: string) {
           return sync.run(`session.pending:${sessionID}`, async () => {
@@ -1719,6 +1756,11 @@ export function createData(config: CreateDataInput) {
         list(sessionID: string) {
           return store.session.permission[sessionID]
         },
+        sessions() {
+          return Object.entries(store.session.permission).flatMap(([sessionID, requests]) =>
+            requests.length > 0 ? [sessionID] : [],
+          )
+        },
         sync(sessionID: string) {
           return sync.run(`session.permission:${sessionID}`, async () => {
             setStore("session", "permission", sessionID, await api().permission.list({ sessionID }))
@@ -1743,6 +1785,11 @@ export function createData(config: CreateDataInput) {
           if (!ref) return
           const key = locationKey(ref)
           return forms?.filter((form) => form.location && locationKey(form.location) === key)
+        },
+        sessions() {
+          return Object.entries(store.session.form).flatMap(([sessionID, forms]) =>
+            sessionID !== "global" && forms.length > 0 ? [sessionID] : [],
+          )
         },
         sync(sessionID: string, ref?: LocationRef) {
           const key = `session.form:${sessionID}:${sessionID === "global" ? locationKey(ref ?? defaultLocation()) : ""}`
@@ -1781,7 +1828,7 @@ export function createData(config: CreateDataInput) {
     },
     project: {
       list() {
-        return Object.values(store.project.info).toSorted((a, b) => b.time.updated - a.time.updated)
+        return Object.values(store.project.info).toSorted((a, b) => b.time.active - a.time.active)
       },
       get(projectID: string) {
         return store.project.info[projectID]

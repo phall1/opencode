@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect } from "bun:test"
 import { Effect, Schema } from "effect"
-import { HttpClientRequest } from "effect/unstable/http"
+import { HttpClientRequest } from "effect/http"
 import { LLM, LLMRequest, Message, ToolCallPart, ToolChoice, ToolDefinition } from "../../src/index.js"
 import { Auth, LLMClient } from "../../src/route.js"
 import { compileRequest } from "../../src/route/client.js"
@@ -371,6 +371,27 @@ describe("OpenAI-compatible Chat route", () => {
       const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
 
       expect(response.text).toBe("Hello")
+      expect(response.finishReason).toEqual({ normalized: "stop", raw: "stop" })
+    }),
+  )
+
+  it.effect("ignores bare null frames between deltas", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              deltaChunk({ role: "assistant", content: "Hello" }),
+              "null",
+              deltaChunk({ content: "!" }),
+              "null",
+              deltaChunk({}, "stop"),
+            ),
+          ),
+        ),
+      )
+
+      expect(response.text).toBe("Hello!")
       expect(response.finishReason).toEqual({ normalized: "stop", raw: "stop" })
     }),
   )
