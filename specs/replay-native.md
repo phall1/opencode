@@ -112,3 +112,42 @@ labeled simulator. Keep data splits by root scenario, not sibling continuation.
 
 Pass evidence and actual coverage live with the implementation and its tests;
 this specification does not claim that all expansion gates are already met.
+
+## Repository experiment acceptance
+
+The next useful checkpoint is a completed assessment **before any repair**. A
+native execution can succeed in inspecting a task whose independent tests still
+fail. Execution success, task success, budget truncation, and an uncertain effect
+must remain separate facts.
+
+The finite repository profile must demonstrate:
+
+- Declared inputs, writable paths, prompts, instructions, budgets, and provenance.
+- Actual disposable disk files, not a file-world simulation presented as a repo.
+- An unchanged assessment checkpoint, two native forks with independent restored
+  worlds, and fresh suffix observations for each continuation.
+- An external verifier running against fresh copies of frozen artifacts. Its
+  held-out tests never enter the actor's world and cannot be edited by the actor.
+- Baseline failure, a general repair passing, and an overfit repair failing the
+  held-out checks. This tests evaluation mechanics, not model intelligence.
+- Complete cold replay without provider, tool, task-file, or verifier execution;
+  verification is a separate, explicit operation.
+- No ambient provider discovery: host-global credential/configuration reads and
+  provider CLI subprocesses are outside the profile too, not invisible exceptions
+  to its zero-live counters.
+- Immutable capsules, separate measurements, and a portable comparison carrying
+  evidence digests and measured outcomes, not just an agent's success message.
+- A write-ahead action fact and a committed receipt. An effect without a receipt
+  is **unknown**; replay, fork, and comparison must not silently treat it as
+  complete or rerun it.
+
+Scripted policies and trusted synthetic executable fixtures remain the first
+supported workload. A clean subprocess environment and an argv allowlist are not
+OS containment: JavaScript can still read host files, spawn processes, or make
+network requests. Explicit acknowledgement is required before running custom
+local code; an untrusted or live-policy workload requires a separately verified
+containment capability before it is admitted.
+
+Do not add range workloads, live-model comparisons, or training until these gates
+have concrete evidence. A report consumable by phux/ops is not a new scheduler,
+and a successful scripted comparison is not evidence of RL efficacy.

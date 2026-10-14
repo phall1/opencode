@@ -6,10 +6,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./archive": "./src/archive.ts",
-    "./measure": "./src/measure.ts"
+    "./measure": "./src/measure.ts",
+    "./repo": "./src/repo.ts"
   },
   "scripts": {
     "demo": "bun run script/demo.ts",
+    "repo-demo": "bun run script/repo-demo.ts",
     "test": "bun test --timeout 60000",
     "typecheck": "tsgo -b"
   },

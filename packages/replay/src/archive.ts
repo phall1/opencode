@@ -120,7 +120,7 @@ function validateLineage(capsule: Capsule, depth: number) {
     throw new Error("Child runtime provenance does not match parent")
 }
 
-function requireIdleContext(context: typeof NativeExport.Type) {
+export function requireIdleContext(context: typeof NativeExport.Type) {
   if (context.info.outcome !== "succeeded") throw new Error("Unsupported checkpoint outcome")
   const last = context.messages.at(-1)
   if (last?.type !== "idle" || last.outcome !== "succeeded")

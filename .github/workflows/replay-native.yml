@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [v2]
   push:
-    branches: [v2, replay-native]
+    branches: [v2]
   workflow_dispatch:
 
 permissions:
@@ -46,3 +46,5 @@ jobs:
         run: bun test test/session-runner-recorded.test.ts --timeout 60000 --only-failures
       - name: Model-free replay demo
         run: bun run replay:demo
+      - name: Trusted repository repair experiment
+        run: bun run replay:repo
