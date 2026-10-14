@@ -10,7 +10,7 @@ import { defaultMatcher, selectFirstMatching, type RequestMatcher } from "./matc
 import type { HttpInteraction, ResponseSnapshot } from "./model.js"
 
 export { defaultMatcher }
-export type RecordReplayMode = "auto" | "record" | "replay" | "passthrough"
+export type RecordReplayMode = NonNullable<RecorderOptions["mode"]>
 export interface RecordReplayOptions {
   readonly mode?: RecordReplayMode
   readonly directory?: string
@@ -162,9 +162,11 @@ export const layer = (
   name: string,
   options: RecorderOptions = {},
 ): Layer.Layer<HttpClient.HttpClient, never, HttpClient.HttpClient> =>
-  recordingLayer(name, { metadata: options.metadata, redactor: make(options.redact), match: options.match }).pipe(
-    Layer.provide(fileSystem({ directory: options.directory })),
-    Layer.provide(NodeFileSystem.layer),
-  )
+  recordingLayer(name, {
+    mode: options.mode,
+    metadata: options.metadata,
+    redactor: make(options.redact),
+    match: options.match,
+  }).pipe(Layer.provide(fileSystem({ directory: options.directory })), Layer.provide(NodeFileSystem.layer))
 export const layerFetch = (name: string, options: RecorderOptions = {}): Layer.Layer<HttpClient.HttpClient> =>
   layer(name, options).pipe(Layer.provide(FetchHttpClient.layer))
