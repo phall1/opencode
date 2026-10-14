@@ -6,6 +6,20 @@
 - Default new branches and worktrees to `v2`, or `origin/v2` when the local `v2` ref is unavailable, and default pull requests to target `v2`. Use another base or target branch when the requester explicitly instructs it.
 - Local `main` ref may not exist; use `v2` or `origin/v2` for diffs.
 
+## Maintained replay fork
+
+- Read `FORK.md` before changing fork-specific execution or evaluation behavior.
+- Use Bun tests, Oxc lint, and the workspace's native TypeScript checker. Replay
+  functions have a complexity ceiling of 10 in the existing Oxc configuration.
+- Never validate replay by replacing the native reasoning loop. Replace only
+  supported I/O capabilities; missing observations must not fall back to live I/O.
+- Keep experiment archives, personal sessions, credentials, and downloaded source
+  references out of git. Use only synthetic fixtures in public tests.
+- A conversation fork is not an environment checkpoint. Document exactly which
+  state is captured, restored, and excluded before claiming fork/replay support.
+- Do not change the user's installed binary, managed service, or live sessions to
+  run this fork's acceptance tests.
+
 ## Live V2 TUI Testing
 
 - Run `bun run dev:live` from a development worktree to test its TUI against the currently elected `opencode` background server and live sessions.

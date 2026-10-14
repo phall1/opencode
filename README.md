@@ -1,3 +1,7 @@
+> **Maintained fork:** [phall1/opencode](https://github.com/phall1/opencode), based on upstream V2.
+> This independent fork adds an experimental native replay/evaluation substrate;
+> it is not an official OpenCode product. Start with [FORK.md](FORK.md).
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>

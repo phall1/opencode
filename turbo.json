@@ -24,6 +24,9 @@
     "@opencode/sdk#typecheck": {
       "dependsOn": ["@opencode/core#typecheck"]
     },
+    "@opencode/replay#typecheck": {
+      "dependsOn": ["@opencode/core#typecheck", "@opencode/sdk#typecheck", "@opencode/simulation#typecheck"]
+    },
     "@opencode/server#typecheck": {
       "dependsOn": ["@opencode/core#typecheck"]
     },

@@ -700,6 +700,26 @@
         "typescript": "catalog:",
       },
     },
+    "packages/replay": {
+      "name": "@opencode/replay",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opencode/ai": "workspace:*",
+        "@opencode/core": "workspace:*",
+        "@opencode/http-recorder": "workspace:*",
+        "@opencode/plugin": "workspace:*",
+        "@opencode/schema": "workspace:*",
+        "@opencode/sdk": "workspace:*",
+        "@opencode/simulation": "workspace:*",
+        "@opencode/util": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
     "packages/schema": {
       "name": "@opencode/schema",
       "version": "2.0.26",
@@ -2268,6 +2288,8 @@
     "@opencode/posts": ["@opencode/posts@workspace:packages/posts"],
 
     "@opencode/protocol": ["@opencode/protocol@workspace:packages/protocol"],
+
+    "@opencode/replay": ["@opencode/replay@workspace:packages/replay"],
 
     "@opencode/schema": ["@opencode/schema@workspace:packages/schema"],
 

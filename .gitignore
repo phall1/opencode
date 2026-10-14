@@ -37,3 +37,5 @@ logs/
 *.bun-build
 tsconfig.tsbuildinfo
 /artifacts/
+.opencode/references/
+/replay-artifacts/

@@ -1,0 +1,32 @@
+{
+  "name": "@opencode/replay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./archive": "./src/archive.ts",
+    "./measure": "./src/measure.ts"
+  },
+  "scripts": {
+    "demo": "bun run script/demo.ts",
+    "test": "bun test --timeout 60000",
+    "typecheck": "tsgo -b"
+  },
+  "dependencies": {
+    "@opencode/ai": "workspace:*",
+    "@opencode/core": "workspace:*",
+    "@opencode/http-recorder": "workspace:*",
+    "@opencode/plugin": "workspace:*",
+    "@opencode/schema": "workspace:*",
+    "@opencode/sdk": "workspace:*",
+    "@opencode/simulation": "workspace:*",
+    "@opencode/util": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@tsconfig/bun": "catalog:",
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:"
+  }
+}
