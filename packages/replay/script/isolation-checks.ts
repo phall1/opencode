@@ -138,7 +138,9 @@ test('writable tmpfs is bounded',()=>{expect(()=>fs.writeFileSync('/output/too-l
     assert.equal(descendant.isolation.guestScope, "before-candidate")
     assert.equal(descendant.isolation.pidLimitHit, null, "unobserved post-timeout counters must not claim zero")
     const pids = await isolatedFixture(
-      `import {test,expect} from 'bun:test'; test('pid limit',async()=>{const children=[];try {for(let i=0;i<80;i++){children.push(Bun.spawn(['/bin/sleep','30'],{stdin:'ignore',stdout:'ignore',stderr:'ignore'}));}}catch(error){console.log('pid-denied',children.length);}finally{children.forEach(child=>child.kill(9));await Promise.all(children.map(child=>child.exited));}expect(children.length).toBeLessThan(80);});`,
+      // Bun's x64 spawn tracker aborts at PID exhaustion. Exercise native fork in
+      // one shell child instead; its EXIT trap uses built-ins to reap its sleepers.
+      `import {test,expect} from 'bun:test'; import fs from 'node:fs'; test('pid limit',async()=>{const script="pids=''; trap 'kill $pids 2>/dev/null; wait' EXIT; i=0; while [ \\"$i\\" -lt 80 ]; do /bin/sleep 30 </dev/null >/dev/null 2>&1 & pids=\\"$pids $!\\"; i=$((i+1)); done; wait";const child=Bun.spawn(['/bin/sh','-c',script],{stdin:'ignore',stdout:'ignore',stderr:'ignore'});await child.exited;expect(fs.readFileSync('/sys/fs/cgroup/pids.events','utf8')).toMatch(/^max [1-9][0-9]*$/m);});`,
     )
     assert.equal(pids.status, "resource-exhausted", pids.stderr)
     assert.equal(pids.isolation.pidLimitHit, true)
