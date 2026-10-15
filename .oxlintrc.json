@@ -24,7 +24,7 @@
   },
   "overrides": [
     {
-      "files": ["packages/replay/**"],
+      "files": ["packages/replay/**", "packages/trace/**"],
       "rules": {
         "complexity": ["error", 10]
       }

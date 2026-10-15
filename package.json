@@ -10,6 +10,8 @@
     "replay": "bun run --cwd packages/replay script/cli.ts",
     "replay:demo": "bun run --cwd packages/replay demo",
     "replay:repo": "bun run --cwd packages/replay script/repo-demo.ts",
+    "trace:demo": "bun run --cwd packages/trace script/demo.ts",
+    "trace:test": "bun run --cwd packages/trace test",
     "replay:test": "bun run --cwd packages/replay test",
     "dev": "bun run --cwd packages/cli src/index.ts",
     "dev:live": "sh -c 'OPENCODE_TUI_CHANNEL=dev OPENCODE_PASSWORD=\"$(opencode service get password)\" exec bun run dev \"$@\" --server \"$(opencode service status)\"' --",

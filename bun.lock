@@ -956,6 +956,23 @@
         "typescript": "catalog:",
       },
     },
+    "packages/trace": {
+      "name": "@opencode/trace",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opencode/core": "workspace:*",
+        "@opencode/schema": "workspace:*",
+        "@opencode/util": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@opencode/replay": "workspace:*",
+        "@opencode/sdk": "workspace:*",
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
     "packages/tui": {
       "name": "@opencode/tui",
       "version": "2.0.26",
@@ -2312,6 +2329,8 @@
     "@opencode/storybook": ["@opencode/storybook@workspace:packages/storybook"],
 
     "@opencode/theme": ["@opencode/theme@workspace:packages/theme"],
+
+    "@opencode/trace": ["@opencode/trace@workspace:packages/trace"],
 
     "@opencode/tui": ["@opencode/tui@workspace:packages/tui"],
 
