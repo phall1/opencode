@@ -30,6 +30,7 @@ bun run replay:demo
 bun run replay:repo
 bun run trace:demo
 bun run trace:test
+bun run replay:isolation
 ```
 
 The explicit archive commands run through the same entrypoint:
@@ -136,6 +137,33 @@ Keep environment choice separate: Docker is one working execution adapter,
 not the tracing model. A microVM's filesystem or RAM snapshot is not restoration
 of external providers, remote peers or OpenCode's complete historical context.
 Validate exact captured/restored/excluded state before adding another backend.
+
+### Contained verifier profile
+
+The Docker-required verifier is an explicit opt-in to a single fixed profile,
+not permission to run arbitrary container images or daemon options. It requires
+an already-running local Unix-socket engine and the cached official Bun image
+`oven/bun@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895`.
+Image preparation is a separate setup step; verifier execution never pulls,
+starts the engine, or falls back to host execution.
+
+The backend supports Linux arm64/amd64 guests with cgroup v2 and built-in seccomp;
+native guest probes must confirm effective privilege and resource restrictions.
+The macOS host uses its existing Linux Docker VM. This does not add a macOS
+`sandbox-exec` backend or promise support for every Docker configuration.
+
+The acceptance command uses owned synthetic canaries. No user credentials or
+production paths are mounted into the candidate. Inspect the effective policy
+before candidate admission; use no network, read-only inputs/root, bounded tmpfs,
+non-root identity, dropped capabilities, private process namespaces, and finite
+resource limits. Remove only the exact labelled container owned by the attempt.
+
+Process containment and reward integrity are separate capabilities. Bun tests and
+JUnit receipts remain a trusted-fixture oracle: candidate code in the same test
+process can still subvert it. Keep `--trust-local-code`, and do not enable
+untrusted/live-policy workloads, range execution, or training solely because
+container denial checks pass. Docker's engine, kernel, and pinned image remain
+trusted; this is not a claim of protection against kernel exploits.
 
 ### Baseline verification
 
