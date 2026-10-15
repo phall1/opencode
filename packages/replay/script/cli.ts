@@ -13,15 +13,16 @@ const [command, file, output] = args
 const arities = new Map<string, readonly number[]>([
   ["record", [2]],
   ["replay", [2]],
-  ["measure", [3, 4]],
+  ["measure", [3, 4, 5]],
   ["fork", [3, 4]],
-  ["experiment", [4]],
+  ["experiment", [4, 5]],
+  ["isolation", [2]],
   ["compare", [2]],
   ["inspect", [2]],
 ])
 if (!file || !arities.get(command)?.includes(args.length))
   throw new Error(
-    "Usage: cli.ts record|replay <capsule.json>; measure <capsule.json> <verifier-id> [--trust-local-code]; fork <capsule.json> <output.json> [--trust-local-code]; experiment <task.json> <new-output-dir> --trust-local-code; compare|inspect <run-dir>",
+    "Usage: cli.ts record|replay <capsule.json>; measure <capsule.json> <verifier-id> [--trust-local-code] [--isolated]; fork <capsule.json> <output.json> [--trust-local-code]; experiment <task.json> <new-output-dir> --trust-local-code [--isolated]; compare|inspect <run-dir>; isolation diagnose",
   )
 
 async function recordCommand() {
@@ -41,9 +42,9 @@ async function replayCommand() {
 async function measureCommand() {
   if (!output) throw new Error("measure requires a verifier ID")
   if (isRepo(file)) {
-    if (args[3] !== "--trust-local-code") throw new Error("Requires --trust-local-code")
+    const options = verifierFlags()
     if (output !== "public" && output !== "heldout") throw new Error("Repo verifier must be public or heldout")
-    return measureRepo(openRepo(file), output, path.dirname(path.resolve(file)), true)
+    return measureRepo(openRepo(file), output, path.dirname(path.resolve(file)), true, options)
   }
   if (args.length !== 3) throw new Error("Usage: memory measure takes three arguments")
   return measure(open(file), output, path.dirname(path.resolve(file)))
@@ -67,9 +68,36 @@ async function forkCommand() {
   return { file: output, ancestry: result.ancestry, isolated: result.isolated }
 }
 async function experimentCommand() {
-  if (!output || args[3] !== "--trust-local-code") throw new Error("Requires --trust-local-code")
+  if (!output) throw new Error("experiment requires an output directory")
+  const options = verifierFlags()
   const { experiment } = await import("../src/repo")
-  return Effect.runPromise(experiment(readBounded(file), output, true))
+  return Effect.runPromise(experiment(readBounded(file), output, true, options))
+}
+
+function verifierFlags() {
+  const flags = args.slice(3)
+  if (!flags.includes("--trust-local-code"))
+    throw new Error("Requires --trust-local-code (isolated oracle is not tamper-proof)")
+  if (
+    new Set(flags).size !== flags.length ||
+    flags.some((flag) => !["--trust-local-code", "--isolated"].includes(flag))
+  )
+    throw new Error("Unknown or duplicate verifier flag")
+  return { isolation: flags.includes("--isolated") ? ("docker-required" as const) : ("trusted-host" as const) }
+}
+
+async function isolationCommand() {
+  if (file !== "diagnose") throw new Error("Usage: isolation diagnose (read-only)")
+  const { dockerCapability } = await import("../src/verifier-isolation")
+  const capability = await dockerCapability()
+  return {
+    mode: "read-only; no container start or image pull",
+    endpoint: capability.endpoint,
+    imageID: capability.imageID,
+    platform: capability.platform,
+    engine: capability.engine,
+    bun: capability.bun,
+  }
 }
 
 function readBounded(file: string) {
@@ -98,6 +126,7 @@ const commands = new Map<string, () => unknown>([
   ["experiment", experimentCommand],
   ["compare", () => compareDirectory(file)],
   ["inspect", () => inspect(file)],
+  ["isolation", isolationCommand],
 ])
 const run = commands.get(command)
 if (!run) throw new Error(`Unknown command: ${command}`)

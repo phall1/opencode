@@ -151,3 +151,45 @@ containment capability before it is admitted.
 Do not add range workloads, live-model comparisons, or training until these gates
 have concrete evidence. A report consumable by phux/ops is not a new scheduler,
 and a successful scripted comparison is not evidence of RL efficacy.
+
+## Verifier containment gate
+
+Containment is an explicit capability, not an automatically selected fallback.
+The first contained verifier uses one fixed Docker profile for local macOS/Linux
+and Linux CI. Runtime admission requires an available local Unix-socket engine
+and an already-cached digest-pinned Bun image; it must not start a daemon, pull an
+image, or run the candidate on the host when admission fails.
+
+Before admitting executable fixture code, inspect the created container's
+effective configuration. Require no network, a read-only root filesystem, one
+read-only mount of freshly restored verifier inputs, bounded writable tmpfs,
+non-root identity, no added capabilities, no-new-privileges, private process
+namespaces, and finite memory/CPU/PID budgets. Do not expose credentials, the
+Docker socket, host process namespaces, or writable host directories.
+
+Admission intent is not enforcement evidence. Acceptance must exercise actual
+denials with owned synthetic host-file and credential canaries, a reachable
+network positive control, read-only source mutations, and descendant cleanup.
+Timeout, resource exhaustion, incomplete reports, and cleanup uncertainty are
+not task success. Cleanup affects only the exact execution-owned container.
+Controller/admission errors are not failed task assertions. An unavailable or
+ambiguous Docker execution leaves incomplete evidence rather than an ordinary
+test-failure receipt. Cancellation must finish owned-process cleanup before the
+public operation settles; cancelling an observer alone does not cancel its
+underlying effect.
+
+Measurements retain requested/effective isolation, implementation/runtime/image
+identity, limits, and observed completion. Existing host-only measurements stay
+host-only; remeasurement never upgrades their evidence in place. Strict cold
+replay does not probe Docker or launch a verifier.
+
+This gate constrains the candidate's host access. It does **not** make an
+in-process Bun test framework or candidate-writable JUnit output an independent,
+tamper-proof reward oracle. Executable-code trust acknowledgement remains
+required, and untrusted/live-policy rollouts stay gated on verifier integrity.
+Containers also retain a trusted engine/kernel/image boundary, not an assurance
+against kernel exploits or hostile administrators.
+
+Primary platform references: [Docker security](https://docs.docker.com/engine/security/),
+[none networking](https://docs.docker.com/engine/network/drivers/none/), and
+[tmpfs lifetime and limits](https://docs.docker.com/engine/storage/tmpfs/).

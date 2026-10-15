@@ -7,6 +7,15 @@ import { HIDDEN, RepoFiles, Task } from "./repo-task"
 import { restoreFiles } from "./repo-world"
 import { temporary } from "./scratch"
 import { VerifierReport, readVerifierReport, validateVerifierReport } from "./repo-junit"
+import {
+  Isolation,
+  IsolationMode,
+  hostIsolation,
+  isolationSummary,
+  runDockerVerifier,
+  type VerifierOptions,
+} from "./verifier-isolation"
+import { runProcess } from "./verifier-process"
 
 const implementation = hash(readFileSync(import.meta.filename, "utf8"))
 export const RepoMeasurement = Schema.Struct({
@@ -18,7 +27,14 @@ export const RepoMeasurement = Schema.Struct({
   implementation: Hash,
   testSource: Hash,
   artifact: Hash,
-  status: Schema.Literals(["passed", "test-failed", "timeout", "output-truncated", "verifier-incomplete"]),
+  status: Schema.Literals([
+    "passed",
+    "test-failed",
+    "timeout",
+    "output-truncated",
+    "verifier-incomplete",
+    "resource-exhausted",
+  ]),
   report: VerifierReport,
   passed: Schema.Boolean,
   stdout: Schema.String,
@@ -30,60 +46,46 @@ export const RepoMeasurement = Schema.Struct({
   execPath: Schema.String,
   bun: Schema.String,
   containment: Schema.String,
+  isolation: Schema.optional(Isolation),
 })
 export type RepoMeasurement = typeof RepoMeasurement.Type
 export type VerifierResult = Awaited<ReturnType<typeof verifyFiles>>
 export function requireTrust(trustLocalCode: boolean) {
   if (trustLocalCode !== true)
-    throw new Error("Requires --trust-local-code: trusted code only; NO OS/network/descendant containment")
+    throw new Error("Requires --trust-local-code: trusted code only; isolation does not make the verifier tamper-proof")
 }
 
-/** Fixed argv, fresh restored world, bounded capture. This is NOT an OS sandbox. */
+/** Trusted host by default; requested Docker isolation fails closed without fallback. */
 export async function verifyFiles(
   task: Task,
   files: typeof RepoFiles.Type,
   verifier: "public" | "heldout",
   trustLocalCode: boolean,
+  options: VerifierOptions = {},
 ) {
   requireTrust(trustLocalCode)
+  const mode = Schema.decodeUnknownSync(IsolationMode)(options.isolation ?? "trusted-host")
   const root = temporary()
   const started = performance.now()
   try {
     const prepared = prepareVerifier(root, task, files, verifier)
-    const child = Bun.spawn(
-      [
-        process.execPath,
-        "--no-install",
-        "--no-env-file",
-        "--no-orphans",
-        `--config=${prepared.config}`,
-        "test",
-        "--reporter=junit",
-        `--reporter-outfile=${prepared.report}`,
-        `./${prepared.target}`,
-      ],
-      {
-        cwd: prepared.directory,
-        env: { HOME: prepared.home, TMPDIR: prepared.tmp, LANG: "C.UTF-8", TZ: "UTC" },
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-      },
+    const execution =
+      mode === "docker-required"
+        ? await runDockerVerifier({
+            root,
+            target: prepared.target,
+            timeoutMs: task.budgets.timeoutMs,
+            outputBytes: task.budgets.outputBytes,
+            signal: options.signal,
+          })
+        : await runHostVerifier(prepared, task, options.signal)
+    const status = verifierStatus(
+      execution.timedOut,
+      execution.truncated,
+      execution.exitCode,
+      execution.report,
+      exhausted(execution.isolation),
     )
-    let timedOut = false
-    const abort = new AbortController()
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill(9)
-      abort.abort()
-    }, task.budgets.timeoutMs)
-    const [stdout, stderr, exitCode] = await Promise.all([
-      capture(child.stdout, task.budgets.outputBytes, abort.signal),
-      capture(child.stderr, task.budgets.outputBytes, abort.signal),
-      child.exited,
-    ]).finally(() => clearTimeout(timer))
-    const report = readVerifierReport(prepared.report)
-    const status = verifierStatus(timedOut, stdout.truncated || stderr.truncated, exitCode, report)
     return {
       scope: verifier,
       verifier: verifier === "public" ? "public-smoke-v1" : task.verifier.id,
@@ -91,20 +93,48 @@ export async function verifyFiles(
       testSource: hash(prepared.source),
       artifact: hash(encode(files)),
       status,
-      report,
+      report: execution.report,
       passed: status === "passed",
-      stdout: stdout.text,
-      stderr: stderr.text,
-      exitCode,
-      timedOut,
-      truncated: stdout.truncated || stderr.truncated,
+      stdout: execution.stdout.text,
+      stderr: execution.stderr.text,
+      exitCode: execution.exitCode,
+      timedOut: execution.timedOut,
+      truncated: execution.truncated,
       elapsedMs: performance.now() - started,
-      execPath: process.execPath,
-      bun: Bun.version,
-      containment: "UNSUPPORTED: trusted code can access host/network and create descendants",
+      execPath: execution.execPath,
+      bun: execution.bun,
+      containment: isolationSummary(execution.isolation),
+      isolation: execution.isolation,
     }
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+}
+
+async function runHostVerifier(prepared: ReturnType<typeof prepareVerifier>, task: Task, signal?: AbortSignal) {
+  const result = await runProcess(
+    [
+      process.execPath,
+      "--no-install",
+      "--no-env-file",
+      "--no-orphans",
+      `--config=${prepared.config}`,
+      "test",
+      "--reporter=junit",
+      `--reporter-outfile=${prepared.report}`,
+      `./${prepared.target}`,
+    ],
+    { HOME: prepared.home, TMPDIR: prepared.tmp, LANG: "C.UTF-8", TZ: "UTC" },
+    task.budgets.timeoutMs,
+    task.budgets.outputBytes,
+    { cwd: prepared.directory, signal },
+  )
+  return {
+    ...result,
+    report: readVerifierReport(prepared.report),
+    isolation: hostIsolation(),
+    execPath: process.execPath,
+    bun: Bun.version,
   }
 }
 
@@ -124,9 +154,16 @@ function prepareVerifier(root: string, task: Task, files: typeof RepoFiles.Type,
   return { directory, target, source, home, tmp, config, report: path.join(root, "junit.xml") }
 }
 
-export function verifierStatus(timeout: boolean, truncated: boolean, exitCode: number, report: VerifierReport) {
+export function verifierStatus(
+  timeout: boolean,
+  truncated: boolean,
+  exitCode: number,
+  report: VerifierReport,
+  resourceExhausted = false,
+) {
   validateVerifierReport(report)
   if (timeout) return "timeout" as const
+  if (resourceExhausted) return "resource-exhausted" as const
   if (truncated) return "output-truncated" as const
   if (exitCode !== 0) return "test-failed" as const
   return completedStatus(report)
@@ -134,8 +171,33 @@ export function verifierStatus(timeout: boolean, truncated: boolean, exitCode: n
 
 export function validateMeasurement(result: RepoMeasurement) {
   if (result.passed !== (result.status === "passed")) throw new Error("Measurement status mismatch")
-  if (result.status !== verifierStatus(result.timedOut, result.truncated, result.exitCode, result.report))
+  if (
+    result.status !==
+    verifierStatus(result.timedOut, result.truncated, result.exitCode, result.report, exhausted(result.isolation))
+  )
     throw new Error("Measurement exit/limit status mismatch")
+  validateIsolation(result.isolation)
+}
+
+function validateIsolation(isolation?: Isolation) {
+  if (!isolation) return // Published legacy receipts explicitly retain unsupported trusted-host semantics.
+  if (isolation.policyDigest !== (isolation.policy === null ? null : hash(encode(isolation.policy))))
+    throw new Error("Isolation policy provenance digest mismatch")
+  if (isolation.mode === "trusted-host") {
+    if (isolation.policy !== null || isolation.guest !== null)
+      throw new Error("Host receipt claims enforced Docker policy")
+    return
+  }
+  requireDockerProvenance(isolation)
+}
+
+function requireDockerProvenance(isolation: Isolation) {
+  if (isolation.policy === null || isolation.guest === null || !isolation.container || !isolation.image)
+    throw new Error("Docker receipt requires inspected policy and guest provenance")
+}
+
+function exhausted(isolation?: Isolation) {
+  return isolation?.oomKilled || isolation?.pidLimitHit || false
 }
 
 function completedStatus(report: VerifierReport) {
@@ -146,38 +208,12 @@ function completedStatus(report: VerifierReport) {
   return "passed" as const
 }
 
-async function capture(stream: ReadableStream<Uint8Array>, limit: number, signal: AbortSignal) {
-  const reader = stream.getReader()
-  // End collection even if trusted fixture descendants keep a pipe open. Not containment.
-  const cancel = () => {
-    void reader.cancel().catch(() => undefined)
-  }
-  signal.addEventListener("abort", cancel, { once: true })
-  const chunks: Uint8Array[] = []
-  let total = 0
-  try {
-    while (true) {
-      const next = await reader.read()
-      if (next.done) break
-      const remaining = Math.max(0, limit - total)
-      if (remaining > 0) chunks.push(next.value.subarray(0, remaining))
-      total += next.value.length
-    }
-  } finally {
-    signal.removeEventListener("abort", cancel)
-  }
-  const text = Buffer.concat(chunks).toString("utf8")
-  return {
-    text: new TextDecoder().decode(Buffer.from(text).subarray(0, limit), { stream: true }),
-    truncated: total > limit || Buffer.byteLength(text) > limit,
-  }
-}
-
 export async function measureRepo(
   capsule: RepoCapsule,
   verifier: "public" | "heldout",
   directory: string,
   trustLocalCode: boolean,
+  options: VerifierOptions = {},
 ) {
   requireTrust(trustLocalCode)
   validateRepo(capsule)
@@ -194,13 +230,14 @@ export async function measureRepo(
       artifact: capsule.manifest.checkpoint,
       state: "started; missing receipt means UNKNOWN; do not repeat",
       testSource: hash(verifier === "public" ? task.files["smoke.test.ts"] : task.verifier.testSource),
+      isolation: Schema.decodeUnknownSync(IsolationMode)(options.isolation ?? "trusted-host"),
     }),
   )
   const result = Schema.decodeUnknownSync(RepoMeasurement)({
     version: 1,
     id,
     episode: capsule.digest,
-    ...(await verifyFiles(task, repoFiles(capsule, "checkpoint"), verifier, trustLocalCode)),
+    ...(await verifyFiles(task, repoFiles(capsule, "checkpoint"), verifier, trustLocalCode, options)),
   })
   durableWrite(path.join(directory, `measurement-${result.id}.json`), encode(result))
   return result

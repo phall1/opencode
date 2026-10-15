@@ -138,6 +138,10 @@ bun run script/cli.ts measure /path/to/new-output/general.json heldout --trust-l
 bun run script/cli.ts fork /path/to/new-output/checkpoint.json /path/to/new-child.json --trust-local-code
 bun run script/cli.ts compare /path/to/new-output
 bun run script/cli.ts inspect /path/to/new-output
+bun run script/cli.ts isolation diagnose     # read-only Docker capability check; no pull/start
+bun run isolation-demo                      # actual Docker deny controls + contained experiment
+bun run script/cli.ts experiment task.json /path/to/new-output --trust-local-code --isolated
+bun run script/cli.ts measure /path/to/new-output/general.json heldout --trust-local-code --isolated
 ```
 
 `@opencode/replay/repo` exposes `experiment`, `replayRepo`, `forkRepo`,
@@ -183,7 +187,94 @@ tasks, capsule measurement and new repo continuations require an explicit trust
 acknowledgment; capsule hashes, task IDs and self-declared trust cannot grant it.
 No secrets/ambient credentials are copied, but host access is not denied by the OS.
 Untrusted code, live/untrusted policies, ranges and paid models remain gated on
-real containment and deny checks. There is no implicit install/network allowance.
+real containment and trustworthy independent oracle checks. There is no implicit install/network allowance.
+
+### Opt-in external verifier containment
+
+`--isolated` selects only the fixed `docker-required` verifier backend. The typed
+`verifyFiles`, `measureRepo`, and `experiment` APIs accept an optional final
+`{ isolation: "trusted-host" | "docker-required", signal?: AbortSignal }` argument.
+Existing callers default to `trusted-host`. Containment **still requires
+`--trust-local-code`**: candidate JavaScript can forge its in-guest JUnit report or
+patch the test framework. This gate adds tested process containment, not an
+independent tamper-proof oracle, untrusted-policy readiness, model-ability evidence,
+a cyber range, or RL readiness. Strict replay never preflights Docker or executes
+the verifier.
+
+Docker must already be running at the selected **local Unix** endpoint, with the
+appropriate Linux arm64/amd64 image already cached:
+
+```
+oven/bun@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895
+```
+
+The controller resolves the selected endpoint once, rejects TCP/SSH contexts, then
+uses explicit `--host`, a clean client environment, and an owned empty Docker
+client configuration (no automatic proxy/credential/environment injection).
+Explicit `DOCKER_CONFIG` and `DOCKER_CONTEXT` selections are honored during
+offline context discovery only; `DOCKER_CONTEXT` takes precedence over `DOCKER_HOST`.
+Missing CLI, daemon, cached image, platform, builtin seccomp, cgroup v2, or enforced limits fails closed.
+There is **no fallback, pull, installation, daemon start, context change, or retry**.
+The Docker engine, kernel, fixed image, and controller remain trusted.
+
+Before any candidate runs, the controller inspects actual container configuration,
+mounts, image, privileges and limits. A fixed Bun keeper (with Docker's init reaper)
+keeps tmpfs mounted; native Docker exec runs the fixed Bun test argv. A pre-candidate
+guest probe checks Bun 1.4.2, unprivileged UID, NoNewPrivs=1, CapEff=0, Seccomp=2,
+and actual cgroup memory/CPU/PID limits. The policy uses no network, a read-only
+root and sole fresh read-only `/verifier` bind, no host PID/IPC or daemon socket,
+all capabilities dropped, no-new-privileges, no daemon logging, 256 MiB memory
+(no swap), one CPU, 64 PIDs, and nosuid/nodev/noexec tmpfs: 16 MiB `/tmp` and
+1 MiB `/output`, with bounded inode counts. Non-root host UID is reused for mode-600
+inputs; root controllers prepare readable files and choose UID 1000, never guest root.
+Child creation is **contained and bounded**, not universally denied.
+
+`docker cp` cannot read tmpfs consistently across engines, and tmpfs disappears on
+container stop. While the keeper remains alive, a fixed fresh Bun extractor opens
+only `/output/junit.xml` with no-follow/nonblocking flags, checks the opened file is
+regular, and reads at most 65,537 bytes. Symlinks/directories/special or oversized
+reports cannot pass. No writable host bind or untrusted archive extraction is used.
+Timeout/cancellation kills the exact UUID/owner-labeled container and its descendants.
+Cleanup is checked before returning a receipt; uncertain cleanup leaves the journal
+UNKNOWN. Kernel OOM/PID events distinguish `resource-exhausted` from test failure,
+timeout, truncation, and incomplete verification.
+
+Docker exec exits 125/126/127, unexpected keeper death, or a nonzero exit without
+completed native JUnit evidence are **UNKNOWN execution**, not ordinary assertion
+failures; no completed measurement receipt is written and no candidate is retried.
+Effect interruption waits uninterruptibly for verifier cleanup before returning.
+Parallel verification aborts siblings on failure and awaits every settlement;
+cleanup errors never become successful verification. Native Effect interruption
+may dominate the caller's rendered cause; the missing receipt still records UNKNOWN.
+
+New measurements freeze isolation mode, image/platform, engine/kernel/security
+options, actual inspected policy plus digest, actual guest enforcement facts,
+finite limits, controller implementation hash, and resource outcomes.
+Guest probes identify their before/after-candidate scope; unavailable post-timeout
+resource outcomes are `null`, not an invented zero. The actual keeper state and
+native Docker exec exit code are separate facts. Started
+markers bind the requested mode, so a Docker request cannot acquire a host receipt.
+Published receipts without isolation remain readable as explicitly legacy,
+unsupported trusted-host evidence; no old archive/source pins are migrated or rewritten.
+Comparison links still refer to saved immutable measurement bytes and display
+host-versus-contained evidence without claiming oracle integrity.
+
+Run actual acceptance (never silently substitutes fake containers):
+
+```sh
+OPENCODE_REPLAY_DOCKER=1 bun test test/isolation.test.ts --timeout 120000
+bun run isolation-demo
+```
+
+Without the explicit environment opt-in, ordinary unit tests skip the named Docker
+integration group; when enabled, missing availability or any missing denial is a
+failure. Acceptance uses only synthetic host files/credentials and an owned local
+HTTP endpoint. A deliberately network-uncontained trusted control verifies the
+**same resolved guest-target address** reaches that endpoint before the isolated
+deny test. Real controls exercise host file read/write denial, input immutability,
+environment/socket/PID exclusion, network denial, bounded tmpfs, surviving
+descendants plus cleanup, and actual PID/OOM exhaustion. The demo saves these
+receipts and the contained baseline/general/overfit experiment and cold-replay evidence.
 
 Self-contained hashed repo capsules freeze task/policy/prompts, budgets, source
 pins, initial/checkpoint files, native context, HTTP/tool results, parent evidence,
@@ -208,7 +299,7 @@ repeat. Defects/interruption stay failures, incomplete evidence cannot become a
 capsule/report, and no uncertain effect is retried or resumed. `inspect` is read-only
 and shares comparison's typed journal validation: receipts must be bounded regular
 files matching the started tool/native/measurement metadata, not merely filenames.
-and retained ledgers survive scratch-world cleanup. The experiment's checkpoint is
+Retained ledgers survive scratch-world cleanup. The experiment's checkpoint is
 specifically quiescent assessment idle, before edits. Further forks use only a
 capsule's succeeded final-idle boundary, the same pinned instructions, and bounded
 ancestry—not arbitrary in-flight/asOf state, historical instruction migration,
