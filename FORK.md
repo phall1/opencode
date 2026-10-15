@@ -28,6 +28,8 @@ bun run check
 bun run replay:test
 bun run replay:demo
 bun run replay:repo
+bun run trace:demo
+bun run trace:test
 bun run replay:isolation
 ```
 
@@ -121,6 +123,20 @@ An action with no committed receipt is unknown, not permission to retry it.
 Being ready for the first row does not establish any of the later rows. Portable
 reports may link immutable capsules into phux/ops; their bounded telemetry is not
 a substitute for episode evidence.
+
+### Native tracing, not a second harness
+
+Metadata tracing is explicitly opt-in and local. It observes the existing native
+runtime, projects sensitive fields away before its bounded queue, and reports
+loss/collector health. It does not enable personal-session content capture,
+remote telemetry, a new agent loop, or a lossless replay guarantee. The demo uses
+synthetic embedded executions; it does not modify the installed binary, managed
+service, global configuration or live sessions.
+
+Keep environment choice separate: Docker is one working execution adapter,
+not the tracing model. A microVM's filesystem or RAM snapshot is not restoration
+of external providers, remote peers or OpenCode's complete historical context.
+Validate exact captured/restored/excluded state before adding another backend.
 
 ### Contained verifier profile
 

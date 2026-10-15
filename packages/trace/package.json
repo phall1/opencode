@@ -1,0 +1,28 @@
+{
+  "name": "@opencode/trace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./records": "./src/records.ts"
+  },
+  "scripts": {
+    "test": "bun test --timeout 60000",
+    "demo": "bun run script/demo.ts",
+    "typecheck": "tsgo -b"
+  },
+  "dependencies": {
+    "@opencode/core": "workspace:*",
+    "@opencode/schema": "workspace:*",
+    "@opencode/util": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@opencode/replay": "workspace:*",
+    "@opencode/sdk": "workspace:*",
+    "@tsconfig/bun": "catalog:",
+    "@types/bun": "catalog:",
+    "@typescript/native-preview": "catalog:"
+  }
+}

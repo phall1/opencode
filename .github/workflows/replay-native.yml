@@ -42,6 +42,8 @@ jobs:
         env:
           OPENCODE_REPLAY_DOCKER: "1"
         run: bun run replay:test
+      - name: Native metadata tracing tests
+        run: bun run trace:test
       - name: Simulation transport regression tests
         working-directory: packages/simulation
         run: bun test --timeout 30000 --only-failures
@@ -52,5 +54,7 @@ jobs:
         run: bun run replay:demo
       - name: Trusted repository repair experiment
         run: bun run replay:repo
+      - name: Native metadata tracing demo
+        run: bun run trace:demo
       - name: Verifier containment acceptance
         run: bun run replay:isolation

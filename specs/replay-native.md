@@ -113,6 +113,44 @@ labeled simulator. Keep data splits by root scenario, not sibling continuation.
 Pass evidence and actual coverage live with the implementation and its tests;
 this specification does not claim that all expansion gates are already met.
 
+## Native metadata tracing
+
+Broad instrumentation and strict replay have different contracts. Start with
+opt-in local metadata collection around the existing native execution, not a
+second agent loop or a vendor tracing SDK as the domain model. Metadata can
+diagnose admissions, delivery, execution, steps and tools; it cannot reconstruct
+provider payloads, missing observations, environment checkpoints or training
+token IDs/logprobs.
+
+Project an explicit field allowlist at the native observation seam **before** any
+collector-owned queue. Exclude prompts, reasoning, instructions, tool input and
+output, errors/stacks, paths, environment values, URLs/headers and arbitrary
+plugin metadata. Default to pseudonymous causal identities; do not mistake
+message identity for a Physical Attempt. Require an explicit Session allowlist
+or an explicit host-wide opt-in. Disabled collection creates no artifact or
+exporter traffic.
+
+Native plugin `event.subscribe` uses an unbounded body-bearing Bus subscription;
+remote HTTP subscriptions instead use the separately bounded serialized event
+feed. Neither establishes a fully bounded metadata pipeline. The first collector
+must use native pre-queue projection and a nonblocking bounded metadata queue,
+with no filesystem or network work in the publication callback. Preserve native
+publication/projection semantics and the existing reasoning loop.
+
+Bound records, bytes, file storage and shutdown drain. Show dropped records,
+collector failures and incomplete coverage rather than hiding them. Collector
+failure must not alter agent control flow; collection completion is not task
+success or a lossless-archive claim. Synthetic acceptance must plant sensitive
+content across supported channels, exercise backpressure/failures/interruption,
+and compare native results with collection disabled/enabled. Measure overhead;
+do not claim it is free.
+
+Environment adapters remain below OpenCode's native runtime. Docker, a local
+microVM and a managed sandbox may differ in execution and snapshot capabilities;
+none changes the metadata contract or supplies a trustworthy RL reward by itself.
+Add only capabilities demonstrated by a concrete adapter and workload, not a
+speculative universal backend registry.
+
 ## Repository experiment acceptance
 
 The next useful checkpoint is a completed assessment **before any repair**. A

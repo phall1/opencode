@@ -239,6 +239,8 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
   counters: Counters
   profile?: HostProfile
   globalDirectory?: string
+  /** Additional native host instrumentation; the fixture's I/O profile remains unchanged. */
+  embed?: OpenCode.EmbedOptions
 }) {
   const world = options.profile?.world ?? (yield* makeWorld(options.files))
   const worlds = new Map<Workspace.ID, Environment.Driver>()
@@ -305,6 +307,7 @@ export const createHost = Effect.fn("Replay.createHost")(function* (options: {
     },
     {
       overrides: [
+        ...(options.embed?.overrides ?? []),
         Global.node.replace(Global.layerWith(scratchGlobal(options.globalDirectory ?? options.directory))),
         CrossSpawnSpawner.node.replace(
           Layer.succeed(

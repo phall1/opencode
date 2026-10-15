@@ -10,6 +10,8 @@
     "replay": "bun run --cwd packages/replay script/cli.ts",
     "replay:demo": "bun run --cwd packages/replay demo",
     "replay:repo": "bun run --cwd packages/replay script/repo-demo.ts",
+    "trace:demo": "bun run --cwd packages/trace script/demo.ts",
+    "trace:test": "bun run --cwd packages/trace test",
     "replay:isolation": "bun run --cwd packages/replay script/isolation-demo.ts",
     "replay:test": "bun run --cwd packages/replay test",
     "dev": "bun run --cwd packages/cli src/index.ts",
