@@ -19,15 +19,19 @@ export const MAX_REPORT_BYTES = 65536
 
 export function readVerifierReport(file: string): VerifierReport {
   const stat = lstatSync(file, { throwIfNoEntry: false })
-  if (!stat) return evidence("missing", null)
-  if (!stat.isFile()) return evidence("unsafe", null)
-  if (stat.size > MAX_REPORT_BYTES) return evidence("oversized", null)
+  if (!stat) return reportEvidence("missing", null)
+  if (!stat.isFile()) return reportEvidence("unsafe", null)
+  if (stat.size > MAX_REPORT_BYTES) return reportEvidence("oversized", null)
   const raw = readFileSync(file, "utf8")
   const counts = parseJunit(raw)
-  return evidence(counts ? "complete" : "malformed", raw, counts)
+  return reportEvidence(counts ? "complete" : "malformed", raw, counts)
 }
 
-function evidence(state: VerifierReport["state"], raw: string | null, counts?: typeof TestCounts.Type): VerifierReport {
+export function reportEvidence(
+  state: VerifierReport["state"],
+  raw: string | null,
+  counts?: typeof TestCounts.Type,
+): VerifierReport {
   return {
     format: "bun-junit-v1",
     parser,

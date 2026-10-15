@@ -5,6 +5,7 @@ import { durableWrite, encode, hash } from "./archive"
 import { RepoCapsule, RepoManifest, openRepo, repoTask, validateRepo } from "./repo-archive"
 import { RepoMeasurement, validateMeasurement } from "./repo-measure"
 import { readJournalFile, requireJournalComplete } from "./journal"
+import { isolationSummary, type Isolation } from "./verifier-isolation"
 
 export function compareRepo(
   checkpoint: RepoCapsule,
@@ -30,7 +31,7 @@ function checkedMeasurement(capsule: RepoCapsule, input: RepoMeasurement, direct
   if (!/^measurement-[a-f0-9-]+\.json$/.test(file)) throw new Error("Invalid measurement receipt filename")
   const saved = readJournalFile(path.join(directory, file))
   if (encode(saved.value) !== encode(result)) throw new Error("Measurement differs from saved receipt")
-  return { ...result, file, digest: saved.digest }
+  return { ...result, file, digest: saved.digest, isolationEvidence: isolationSummary(result.isolation) }
 }
 
 function requireMeasurementSource(capsule: RepoCapsule, measurement: RepoMeasurement) {
@@ -85,9 +86,9 @@ function writeComparison(
     }),
     realCost: "UNKNOWN/not measured (scripted)",
     interpretation:
-      "Baseline test failures are pre-existing task failures. Heldout failures are task failures, NOT native execution failures. Timeout/output truncation/verifier-incomplete are indeterminate verification, NOT passes. Native execution failures/incomplete receipts cannot produce comparison capsules.",
+      "Baseline test failures are pre-existing task failures. Heldout failures are task failures, NOT native execution failures. Timeout/resource exhaustion/output truncation/verifier-incomplete are indeterminate verification, NOT passes. Native execution failures/incomplete receipts cannot produce comparison capsules.",
     coverage:
-      "Scripted provider responses; native runner/read/write/permissions/fork/move. No model-ability, RL, live model, arbitrary historical checkpoint or OS containment claim.",
+      "Scripted provider responses; native runner/read/write/permissions/fork/move. Verifier isolation is recorded per measurement. No model-ability, RL, live model, arbitrary historical checkpoint or tamper-proof oracle claim.",
   }
   const file = path.join(directory, `comparison-${id}.json`)
   const markdown = path.join(directory, `comparison-${id}.md`)
@@ -110,13 +111,13 @@ function requireVerifiers(capsule: RepoCapsule, measurements: readonly RepoMeasu
 function render(report: {
   taskID: string
   checkpoint: { digest: string; native: typeof RepoManifest.Type.evidence }
-  baseline: readonly { status: string; verifier: string; file: string }[]
+  baseline: readonly { status: string; verifier: string; file: string; isolation?: Isolation }[]
   continuations: readonly {
     policy: string
     file: string
     digest: string
     native: typeof RepoManifest.Type.evidence
-    measurements: readonly { verifier: string; status: string; file: string }[]
+    measurements: readonly { verifier: string; status: string; file: string; isolation?: Isolation }[]
   }[]
   interpretation: string
   coverage: string
@@ -125,12 +126,12 @@ function render(report: {
     `# Scripted repository comparison: ${report.taskID}`,
     `\nCheckpoint: [checkpoint.json](checkpoint.json), SHA-256 \`${report.checkpoint.digest}\`. Quiescent assessment idle, before edits.`,
     `\nAssessment: ${report.checkpoint.native.requests} requests / ${report.checkpoint.native.tools} native tools; ${report.checkpoint.native.elapsedMs.toFixed(1)} ms (${report.checkpoint.native.elapsedScope}).`,
-    `\nBaseline (pre-existing): ${report.baseline.map((measurement) => `[${measurement.verifier}: ${measurement.status}](${measurement.file})`).join(", ")}.`,
+    `\nBaseline (pre-existing): ${report.baseline.map((measurement) => `[${measurement.verifier}: ${measurement.status}](${measurement.file}) (${isolationSummary(measurement.isolation)})`).join(", ")}.`,
     "\n| Scripted policy | Native execution | New suffix requests / tools | Elapsed ms (scope) | Verification |",
     "| --- | --- | --- | --- | --- |",
     ...report.continuations.map(
       (entry) =>
-        `| [${entry.policy}](${entry.file}) | ${entry.native.outcome} | ${entry.native.requests} / ${entry.native.tools} | ${entry.native.elapsedMs.toFixed(1)} (${entry.native.elapsedScope}) | ${entry.measurements.map((measurement) => `[${measurement.verifier}: ${measurement.status}](${measurement.file})`).join("; ")} |`,
+        `| [${entry.policy}](${entry.file}) | ${entry.native.outcome} | ${entry.native.requests} / ${entry.native.tools} | ${entry.native.elapsedMs.toFixed(1)} (${entry.native.elapsedScope}) | ${entry.measurements.map((measurement) => `[${measurement.verifier}: ${measurement.status}](${measurement.file}) (${isolationSummary(measurement.isolation)})`).join("; ")} |`,
     ),
     ...report.continuations.map(
       (entry) =>
@@ -139,7 +140,7 @@ function render(report: {
     "\nReal model cost: **UNKNOWN / not measured**. Scripted responses are not a model-ability benchmark.",
     `\n${report.interpretation}`,
     `\n${report.coverage}`,
-    "\nOS/network/process-tree isolation is unsupported; custom code requires explicit trust.\n",
+    "\nTrusted-host measurements have no OS containment. Docker-required measurements freeze inspected process containment. All custom code still requires explicit trust: the in-guest Bun/JUnit oracle is NOT tamper-proof.\n",
   ].join("\n")
 }
 

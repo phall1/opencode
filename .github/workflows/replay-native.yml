@@ -36,7 +36,11 @@ jobs:
       - name: HTTP recorder regression tests
         working-directory: packages/http-recorder
         run: bun test --timeout 30000 --only-failures
+      - name: Prepare digest-pinned verifier runtime
+        run: docker pull oven/bun@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895
       - name: Native replay acceptance tests
+        env:
+          OPENCODE_REPLAY_DOCKER: "1"
         run: bun run replay:test
       - name: Simulation transport regression tests
         working-directory: packages/simulation
@@ -48,3 +52,5 @@ jobs:
         run: bun run replay:demo
       - name: Trusted repository repair experiment
         run: bun run replay:repo
+      - name: Verifier containment acceptance
+        run: bun run replay:isolation

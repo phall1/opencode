@@ -37,10 +37,13 @@ import {
 } from "./runtime"
 import { measureRepo, requireTrust } from "./repo-measure"
 import { compareRepo } from "./repo-report"
+import { IsolationMode, type VerifierOptions } from "./verifier-isolation"
+import { awaitVerifier } from "./verifier-effect"
 
 export { Task, Action, RepoFiles, demoTask, decodeTask, type Policy } from "./repo-task"
 export { RepoCapsule, RepoManifest, openRepo, saveRepo, validateRepo } from "./repo-archive"
 export { RepoMeasurement, measureRepo } from "./repo-measure"
+export { IsolationMode, dockerCapability, type VerifierOptions } from "./verifier-isolation"
 export { compareRepo } from "./repo-report"
 
 const REPO_SOURCES = [
@@ -378,14 +381,16 @@ export const forkRepo = Effect.fn("Repo.fork")(function* (
   )
 })
 
-/** Trusted synthetic plans only; neither live model evaluation nor OS containment. */
+/** Trusted synthetic plans only; optional containment does not make the oracle tamper-proof. */
 export const experiment = Effect.fn("Repo.experiment")(function* (
   input: unknown,
   output: string,
   trustLocalCode: boolean,
+  options: VerifierOptions = {},
 ) {
   requireTrust(trustLocalCode)
   const task = decodeTask(input)
+  const isolation = Schema.decodeUnknownSync(IsolationMode)(options.isolation ?? "trusted-host")
   return yield* withScratch((scratch) =>
     Effect.gen(function* () {
       const directory = makeRunDirectory(path.dirname(path.resolve(output)), path.basename(output))
@@ -394,27 +399,26 @@ export const experiment = Effect.fn("Repo.experiment")(function* (
         encode({
           task,
           state: "planned",
-          mode: "scripted; trusted; no OS containment",
+          mode: "scripted; trusted; verifier oracle not tamper-proof",
+          isolation,
           policies: ["assessment", "general", "overfit"],
         }),
       )
       const parent = yield* assessment(task, makeRunDirectory(directory, "assessment-run"), scratch).pipe(Effect.scoped)
       saveRepo(path.join(directory, "checkpoint.json"), parent)
-      const baseline = yield* Effect.promise(() => measureRepo(parent, "heldout", directory, true))
+      const baseline = yield* awaitVerifier(
+        (signal) => measureRepo(parent, "heldout", directory, true, { ...options, signal }),
+        options.signal,
+      )
       const general = yield* forkRepo(parent, makeRunDirectory(directory, "general-run"), true, "general")
       const overfit = yield* forkRepo(parent, makeRunDirectory(directory, "overfit-run"), true, "overfit")
       saveRepo(path.join(directory, "general.json"), general)
       saveRepo(path.join(directory, "overfit.json"), overfit)
       if (encode(snapshotDisk(path.join(scratch, "assessment-world"), task)) !== encode(task.files))
         throw new Error("Original actor world changed")
-      const measurements = yield* Effect.promise(async () =>
-        Promise.all(
-          [general, overfit].map(async (capsule) => ({
-            capsule,
-            public: await measureRepo(capsule, "public", directory, true),
-            heldout: await measureRepo(capsule, "heldout", directory, true),
-          })),
-        ),
+      const measurements = yield* awaitVerifier(
+        (signal) => measureContinuations([general, overfit], directory, options, signal),
+        options.signal,
       )
       const report = compareRepo(parent, baseline, measurements, directory)
       durableWrite(
@@ -437,3 +441,31 @@ export const experiment = Effect.fn("Repo.experiment")(function* (
     }),
   ).pipe(Effect.scoped, Effect.timeout("120 seconds"))
 })
+
+async function measureContinuations(
+  capsules: readonly RepoCapsule[],
+  directory: string,
+  options: VerifierOptions,
+  signal: AbortSignal,
+) {
+  const siblings = new AbortController()
+  const shared = AbortSignal.any([signal, siblings.signal])
+  const results = await Promise.allSettled(
+    capsules
+      .map(async (capsule) => ({
+        capsule,
+        public: await measureRepo(capsule, "public", directory, true, { ...options, signal: shared }),
+        heldout: await measureRepo(capsule, "heldout", directory, true, { ...options, signal: shared }),
+      }))
+      .map((pending) =>
+        pending.catch((error: unknown) => {
+          siblings.abort(error)
+          throw error
+        }),
+      ),
+  )
+  const rejected = results.filter((result) => result.status === "rejected")
+  const failure = rejected.find((result) => result.reason !== shared.reason) ?? rejected[0]
+  if (failure) throw failure.reason
+  return results.filter((result) => result.status === "fulfilled").map((result) => result.value)
+}

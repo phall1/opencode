@@ -3,6 +3,7 @@ import path from "node:path"
 import { Schema } from "effect"
 import { Hash, MAX_BYTES, ToolEntry, canonical, hash, parseJson } from "./archive"
 import { RepoMeasurement, validateMeasurement } from "./repo-measure"
+import { IsolationMode } from "./verifier-isolation"
 
 const ToolStarted = Schema.Struct({
   occurrence: Schema.Int,
@@ -24,6 +25,7 @@ const MeasurementStarted = Schema.Struct({
   artifact: Hash,
   state: Schema.Literal("started; missing receipt means UNKNOWN; do not repeat"),
   testSource: Hash,
+  isolation: Schema.optional(IsolationMode),
 })
 const Started = Schema.Union([ToolStarted, TrackedStarted, MeasurementStarted])
 const TrackedReceipt = Schema.Struct({ state: Schema.Literal("completed"), name: Schema.String })
@@ -95,6 +97,7 @@ function measurementReceipt(file: string, base: string, started: typeof Measurem
     implementation: receipt.implementation,
     artifact: receipt.artifact,
     testSource: receipt.testSource,
+    isolation: receipt.isolation?.mode ?? "trusted-host",
   }
   const expected = {
     id: started.id,
@@ -103,6 +106,7 @@ function measurementReceipt(file: string, base: string, started: typeof Measurem
     implementation: started.implementation,
     artifact: started.artifact,
     testSource: started.testSource,
+    isolation: started.isolation ?? "trusted-host",
   }
   if (canonical(actual) !== canonical(expected)) throw new Error("Measurement receipt does not match started effect")
   return { file: `${base}.json`, digest: read.digest }
