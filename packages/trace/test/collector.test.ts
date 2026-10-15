@@ -644,6 +644,58 @@ for (const fault of ["defect", "interrupt", "stall"] as const) {
   }
 }
 
+it.live("overlapping host release cannot certify collector completion while unsubscribe is pending", () =>
+  withScratch((directory) =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const sink = memorySink()
+      const collector = yield* start(options, sink)
+      const hostScope = yield* Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void))
+      const custom = Bus.node.mapLayer((layer) =>
+        Layer.effect(
+          Bus.Service,
+          Effect.gen(function* () {
+            const bus = yield* Bus.Service
+            return Bus.Service.of({
+              ...bus,
+              listen: (listener) =>
+                bus
+                  .listen(listener)
+                  .pipe(
+                    Effect.map((unsubscribe) =>
+                      unsubscribe.pipe(
+                        Effect.andThen(Deferred.succeed(entered, undefined)),
+                        Effect.andThen(Deferred.await(release)),
+                      ),
+                    ),
+                  ),
+            })
+          }),
+        ).pipe(Layer.provide(layer)),
+      )
+      yield* Layer.build(
+        LayerNode.compile(LayerNode.group([SdkPlugins.node, Bus.node]), {
+          replacements: [
+            Global.node.replace(scratchGlobal(directory)),
+            Bus.node.replace(custom),
+            ...collector.overrides,
+          ],
+        }),
+      ).pipe(Effect.provideService(Scope.Scope, hostScope))
+      const closing = yield* Scope.close(hostScope, Exit.void).pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      yield* collector.close
+      expect(collector.health().state).toBe("closed")
+      expect(collector.health().complete).toBe(false)
+      expect(collector.health().collectionFailures).toBe(0)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(closing)
+      expect(collector.health().complete).toBe(false)
+    }),
+  ).pipe(Effect.scoped),
+)
+
 it.live("custom native Bus configuration and actual Bus identity survive observer acquisition", () => {
   const sink = memorySink()
   const original: { bus?: Bus.Interface } = {}

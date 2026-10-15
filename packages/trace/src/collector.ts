@@ -40,6 +40,7 @@ export const start = Effect.fnUntraced(function* (options: Enabled, sink: Sink) 
     closing: false,
     attached: false,
     incomplete: false,
+    observerReleases: 0,
     accepted: 0,
     reserved: 0,
   }
@@ -89,6 +90,7 @@ export const start = Effect.fnUntraced(function* (options: Enabled, sink: Sink) 
   const releaseObserver = Effect.fnUntraced(function* (unsubscribe: Bus.Unsubscribe) {
     // Claim cleanup once: host release and explicit close share this operation.
     if (!unsubscribes.delete(unsubscribe)) return
+    state.observerReleases++
     yield* unsubscribe.pipe(
       Effect.interruptible,
       Effect.timeout(caps.shutdownMs),
@@ -100,6 +102,7 @@ export const start = Effect.fnUntraced(function* (options: Enabled, sink: Sink) 
           state.incomplete = true
         }),
       ),
+      Effect.ensuring(Effect.sync(() => state.observerReleases--)),
     )
   })
   const write = (text: string) =>
@@ -156,7 +159,10 @@ export const start = Effect.fnUntraced(function* (options: Enabled, sink: Sink) 
       pending.length = 0
       health.queued = 0
       health.queuedBytes = 0
-      const complete = successfulScope && state.attached && !state.incomplete && active.size === 0
+      // Another scope may already own observer cleanup. Do not certify an
+      // unsettled release merely because it was removed from the admission set.
+      const complete =
+        successfulScope && state.attached && !state.incomplete && active.size === 0 && state.observerReleases === 0
       // An on-disk footer cannot certify the close that happens after its write.
       // Only live health after close may report complete; never leave a success
       // marker on disk when the subsequent close can still fail.

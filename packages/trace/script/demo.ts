@@ -1,5 +1,18 @@
 import { Effect } from "effect"
-import { scenario } from "./fixture"
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs"
+import path from "node:path"
+import { createHash } from "node:crypto"
+import { temporary } from "../../replay/src/scratch"
+import { CANARY, scenario } from "./fixture"
+
+if (process.argv.length > 3) throw new Error("Usage: demo.ts [new-output-directory]")
+const directory = process.argv[2] ? path.resolve(process.argv[2]) : temporary()
+if (process.argv[2]) {
+  if (realpathSync(path.dirname(directory)) !== path.dirname(directory))
+    throw new Error("Demo output parent must be canonical")
+  mkdirSync(directory, { mode: 0o700 })
+}
+const artifacts: { file: string; digest: string }[] = []
 
 async function measure(enabled: boolean) {
   const started = performance.now()
@@ -30,6 +43,10 @@ for (let index = 0; index < 5; index++) {
   const on = await measure(true)
   if (off.result.context !== on.result.context) throw new Error("Native context changed")
   if (JSON.stringify(off.result.world) !== JSON.stringify(on.result.world)) throw new Error("Native world changed")
+  if (on.result.text.includes(CANARY)) throw new Error("Trace contains synthetic sensitive content")
+  const file = path.join(directory, `events-${index + 1}.jsonl`)
+  writeFileSync(file, on.result.text, { flag: "wx", mode: 0o600 })
+  artifacts.push({ file, digest: createHash("sha256").update(on.result.text).digest("hex") })
   samples.push(off.sample, on.sample)
 }
 const timings = (enabled: boolean) => {
@@ -39,16 +56,14 @@ const timings = (enabled: boolean) => {
     .sort((a, b) => a - b)
   return { p50Ms: values[2], p95Ms: values[4] }
 }
-console.log(
-  JSON.stringify(
-    {
-      scope:
-        "Five local synthetic SDK pairs; cold/warm mixed, unrepresentative; scripted transport, no live provider or exporter network. RSS is process-wide, CPU is per-sample microseconds.",
-      off: timings(false),
-      on: timings(true),
-      samples,
-    },
-    null,
-    2,
-  ),
-)
+const summary = {
+  scope:
+    "Five local synthetic SDK pairs; cold/warm mixed, unrepresentative; scripted transport, no live provider or exporter network. RSS is process-wide, CPU is per-sample microseconds.",
+  directory,
+  artifacts,
+  off: timings(false),
+  on: timings(true),
+  samples,
+}
+writeFileSync(path.join(directory, "summary.json"), JSON.stringify(summary, null, 2), { flag: "wx", mode: 0o600 })
+console.log(JSON.stringify(summary, null, 2))

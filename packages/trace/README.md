@@ -125,6 +125,13 @@ Docker/microVM environment assurance is separate and backend-agnostic.
 ## Synthetic proof and small measurement
 
 From the repository root: `bun run trace:test` and `bun run trace:demo`.
+The demo retains five metadata-only `events-*.jsonl` files and `summary.json` in
+an owned temporary directory, printed with each trace digest. Pass a new canonical
+output path to retain them elsewhere: `bun run trace:demo /path/to/new-output`.
+Existing outputs are never overwritten. These are diagnostic trace artifacts,
+not lossless capsules or replay checkpoints.
+Keep collection output outside version control; the fork ignores `trace-v1-*`
+capture directories and its conventional root `trace-artifacts` directory.
 Alternatively, run `bun test --timeout 60000` and `bun run script/demo.ts` from
 `packages/trace`. The demo uses the replay fixture's real SDK host, production
 runner/tools/provider parser and scripted transport with pinned instructions,
@@ -132,4 +139,5 @@ memory files and no ambient personal configuration or live models. It compares
 five tracing-off/on pairs, checking equal native context/world/outcome and reporting
 elapsed p50/p95, CPU, process RSS, trace bytes, queue peaks and drops. These tiny,
 cold/warm-mixed local samples are not representative overhead benchmarks or a
-zero-overhead claim. Temporary fixture artifacts are removed by scoped cleanup.
+zero-overhead claim. Temporary worlds and body-bearing fixture archives are
+removed by scoped cleanup; only the sanitized metadata copies and measurements remain.

@@ -4,22 +4,69 @@ import { testEffect } from "../../core/test/lib/effect"
 import { CANARY, scenario } from "../script/fixture"
 import { Trace, TraceRecords } from "../src/index"
 import { withScratch } from "../../replay/src/runtime"
-import { existsSync, mkdirSync, realpathSync, readdirSync, statSync, symlinkSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, statSync, symlinkSync } from "node:fs"
+import path from "node:path"
+import { createHash } from "node:crypto"
+import { runProcess } from "../../replay/src/verifier-process"
 
 const it = testEffect(Layer.empty)
 
-it.live("disabled capture adds no spans and does not suppress existing native tracing", () => Effect.gen(function* () {
-  const names: string[] = []
-  const tracer = Tracer.make({ span(options) {
-    names.push(options.name)
-    return new Tracer.NativeSpan(options)
-  } })
-  yield* Effect.gen(function* () {
-    yield* Trace.capture()
-    yield* Effect.void.pipe(Effect.withSpan("native-fixture"))
-  }).pipe(Effect.provideService(Tracer.Tracer, tracer))
-  expect(names).toEqual(["native-fixture"])
-}))
+it.live("demo CLI retains only inspectable metadata artifacts and refuses existing output", () =>
+  withScratch((root) =>
+    Effect.gen(function* () {
+      const directory = path.join(realpathSync(root), "retained")
+      const argv = [process.execPath, path.join(import.meta.dir, "../script/demo.ts"), directory]
+      const result = yield* Effect.promise(() => runProcess(argv, {}, 30000, 65536))
+      expect(result.exitCode).toBe(0)
+      expect(result.timedOut).toBe(false)
+      expect(result.stdout.text).not.toContain(CANARY)
+      const summary = Schema.decodeUnknownSync(
+        Schema.fromJsonString(
+          Schema.Struct({ artifacts: Schema.Array(Schema.Struct({ file: Schema.String, digest: Schema.String })) }),
+        ),
+      )(readFileSync(path.join(directory, "summary.json"), "utf8"))
+      expect(summary.artifacts).toHaveLength(5)
+      expect(readdirSync(directory)).toHaveLength(6)
+      expect(statSync(directory).mode & 0o777).toBe(0o700)
+      summary.artifacts.forEach((artifact) => {
+        const text = readFileSync(artifact.file, "utf8")
+        expect(text).not.toContain(CANARY)
+        expect(statSync(artifact.file).mode & 0o777).toBe(0o600)
+        expect(createHash("sha256").update(text).digest("hex")).toBe(artifact.digest)
+        const records = text
+          .trim()
+          .split("\n")
+          .map((line) => Schema.decodeUnknownSync(Schema.fromJsonString(TraceRecords.Record))(line))
+        expect(records[0].kind).toBe("header")
+        expect(records.at(-1)?.kind).toBe("summary")
+      })
+      const before = readFileSync(path.join(directory, "summary.json"))
+      const duplicate = yield* Effect.promise(() => runProcess(argv, {}, 30000, 65536))
+      expect(duplicate.exitCode).not.toBe(0)
+      expect(readFileSync(path.join(directory, "summary.json"))).toEqual(before)
+      const invalid = yield* Effect.promise(() => runProcess([...argv, "unexpected"], {}, 30000, 65536))
+      expect(invalid.exitCode).not.toBe(0)
+      expect(invalid.stderr.text).toContain("Usage:")
+    }),
+  ).pipe(Effect.scoped),
+)
+
+it.live("disabled capture adds no spans and does not suppress existing native tracing", () =>
+  Effect.gen(function* () {
+    const names: string[] = []
+    const tracer = Tracer.make({
+      span(options) {
+        names.push(options.name)
+        return new Tracer.NativeSpan(options)
+      },
+    })
+    yield* Effect.gen(function* () {
+      yield* Trace.capture()
+      yield* Effect.void.pipe(Effect.withSpan("native-fixture"))
+    }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+    expect(names).toEqual(["native-fixture"])
+  }),
+)
 
 it.live(
   "collector sink failure and projection defects leave actual native execution unchanged",

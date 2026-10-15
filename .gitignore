@@ -39,3 +39,5 @@ tsconfig.tsbuildinfo
 /artifacts/
 .opencode/references/
 /replay-artifacts/
+/trace-artifacts/
+trace-v1-*/
