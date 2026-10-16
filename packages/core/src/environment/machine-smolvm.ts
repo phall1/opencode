@@ -6,7 +6,7 @@ import { Effect } from "effect"
 import { AppProcess } from "@opencode/util/process"
 
 export interface Options {
-  readonly processes: AppProcess.Service
+  readonly processes: AppProcess.Interface
   readonly binary?: string
   readonly namePrefix?: string
   readonly cpus?: number
