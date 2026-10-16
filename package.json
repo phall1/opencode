@@ -10,6 +10,7 @@
     "replay": "bun run --cwd packages/replay script/cli.ts",
     "replay:demo": "bun run --cwd packages/replay demo",
     "replay:repo": "bun run --cwd packages/replay script/repo-demo.ts",
+    "smolvm:probe": "SMOLVM_DATA_DIR=/tmp/opencode-smolvm-probe bun run --cwd packages/replay script/smolvm-probe.ts",
     "trace:demo": "bun run --cwd packages/trace script/demo.ts",
     "trace:test": "bun run --cwd packages/trace test",
     "replay:isolation": "bun run --cwd packages/replay script/isolation-demo.ts",
