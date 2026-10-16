@@ -25,3 +25,5 @@ export const makeFiles = (driver: Driver): Files => ({
   ...execDefaults(driver.spawner),
   ...driver.overrides,
 })
+
+export * as MachineRuntime from "./machine.js"
