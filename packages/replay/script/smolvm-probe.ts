@@ -1,5 +1,4 @@
-import { Effect, Layer } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { Effect } from "effect"
 import { AppProcess } from "@opencode/util/process"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { make as makeSmol } from "@opencode/core/environment/machine-smolvm"
@@ -13,7 +12,6 @@ mkdirSync(outputDir, { recursive: true, mode: 0o700 })
 const profile = Effect.gen(function* () {
   const processes = yield* AppProcess.Service
   const runtime = makeSmol({ processes, cpus: 1, memoryMB: 256 })
-  const started = yield* Effect.sync(() => Date.now())
   const parentStart = yield* Effect.sync(() => Date.now())
   const parent = yield* runtime.create({ image: "alpine" })
   const parentReadyMs = Date.now() - parentStart
