@@ -49,7 +49,13 @@ export const make = (provider = "memory", options?: { memoryMB?: number }) => {
         const original = machines.get(parent)
         if (!original) yield* Effect.fail(new MachineRuntime.Error({ message: `Parent not found: ${parent}` }))
         const id = name ?? `${provider}-${++next}`
-        machines.set(id, { ...original, id })
+        machines.set(id, {
+          id,
+          provider,
+          state: original.state,
+          threads: original.threads,
+          stdout: original.stdout,
+        })
         return { id }
       }),
     exec: ({ id, command, timeoutMs }) =>

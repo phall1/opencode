@@ -21,19 +21,26 @@ export const make = (options: Options) => {
   const names = new Map<string, string>()
   const fresh = () => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
+  const machineError = (error: unknown) =>
+    error instanceof MachineRuntime.Error
+      ? error
+      : new MachineRuntime.Error({ message: error instanceof Error ? error.message : String(error) })
+
   const run = (args: readonly string[], timeoutMs = 30_000) =>
     options.processes.run(ChildProcess.make(binary, args, { stdin: "ignore" }), {
       timeout: `${timeoutMs} millis`,
     }).pipe(
+      Effect.mapError(machineError),
       Effect.flatMap((result) => {
-        const stdout = result.stdout.toString("utf8")
-        const stderr = result.stderr.toString("utf8")
-        if (result.exitCode !== 0) {
+        const typed = result as { readonly exitCode: number; readonly stdout: Buffer; readonly stderr: Buffer }
+        const stdout = typed.stdout.toString("utf8")
+        const stderr = typed.stderr.toString("utf8")
+        if (typed.exitCode !== 0) {
           return Effect.fail(new MachineRuntime.Error({
-            message: stderr.trim() || stdout.trim() || `${binary} exited with code ${result.exitCode}`,
+            message: stderr.trim() || stdout.trim() || `${binary} exited with code ${typed.exitCode}`,
           }))
         }
-        return Effect.succeed({ stdout, stderr, code: result.exitCode })
+        return Effect.succeed({ stdout, stderr, code: typed.exitCode })
       }),
     )
 
