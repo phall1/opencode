@@ -48,7 +48,7 @@ export const make = (provider = "memory", options?: { memoryMB?: number }) => {
       Effect.gen(function* () {
         const original = machines.get(parent)
         if (!original) yield* Effect.fail(new MachineRuntime.Error({ message: `Parent not found: ${parent}` }))
-        const parentMachine: Stored = original
+        const parentMachine: Stored = original as Stored
         const id = name ?? `${provider}-${++next}`
         machines.set(id, {
           id,
