@@ -27,3 +27,4 @@ export const makeFiles = (driver: Driver): Files => ({
 })
 
 export * as MachineRuntime from "./machine.js"
+export * as MachineSmolVM from "./machine-smolvm.js"
