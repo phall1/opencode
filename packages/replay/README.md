@@ -29,11 +29,11 @@ The fixed, trusted scenario writes a synthetic service configuration into a
 parent, branches twice and changes only the children. The host freezes at most
 4,096 UTF-8 bytes from each export and scores that data using its own rules:
 
-| Artifact | Public checks | Full policy |
-| --- | --- | --- |
-| Baseline | FAILED | FAILED |
-| General repair | PASSED | PASSED |
-| Public-only repair | PASSED | FAILED |
+| Artifact           | Public checks | Full policy |
+| ------------------ | ------------- | ----------- |
+| Baseline           | FAILED        | FAILED      |
+| General repair     | PASSED        | PASSED      |
+| Public-only repair | PASSED        | FAILED      |
 
 The full policy also requires auditing and preservation of the synthetic service.
 Unknown/corrupt/missing/truncated observations produce `UNKNOWN`, not a failed
@@ -51,6 +51,11 @@ failure or interruption leaves the run `UNKNOWN`, with no automatic action retry
 The adapter uses a private HOME/cache/data root: `SMOLVM_DATA_DIR` alone is ignored
 on macOS. Missing resources are safe to clean up; pre-existing named forks are
 not adopted or deleted.
+
+The SmolVM exec adapter requires a POSIX `/bin/sh` supporting `exec --`.
+Its per-call completion trailer separates ordinary guest exit codes and stderr
+from incomplete controller operations; it is not compromised-guest attestation.
+Both CLI commands reserve stdout for their JSON result and send logs to stderr.
 
 Offline remeasurement needs neither SmolVM nor Docker. It reads bounded regular
 files, validates schemas and artifact hashes, and writes a new receipt without

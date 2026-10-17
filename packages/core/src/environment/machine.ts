@@ -8,10 +8,9 @@ export class Error extends Schema.TaggedError<Error>()("MachineRuntime.Error", {
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
-export class ProviderNotFound extends Schema.TaggedError<ProviderNotFound>()(
-  "MachineRuntime.ProviderNotFound",
-  { provider: Schema.String },
-) {}
+export class ProviderNotFound extends Schema.TaggedError<ProviderNotFound>()("MachineRuntime.ProviderNotFound", {
+  provider: Schema.String,
+}) {}
 
 export interface Interface {
   /**
@@ -34,8 +33,10 @@ export interface Interface {
    * readiness requirements and must document exactly which state is copied,
    * shared or excluded; this type alone does not prove full-world isolation.
    */
-  readonly fork: (input: { readonly parent: string; readonly name?: string }) =>
-    Effect.Effect<{ readonly id: string }, Error>
+  readonly fork: (input: {
+    readonly parent: string
+    readonly name?: string
+  }) => Effect.Effect<{ readonly id: string }, Error>
   /**
    * Run a command in one instance. Nothing here assumes an interactive shell,
    * pager, terminal or agent loop beyond the underlying provider.
@@ -44,10 +45,7 @@ export interface Interface {
     readonly id: string
     readonly command: readonly string[]
     readonly timeoutMs?: number
-  }) => Effect.Effect<
-    { readonly exitCode: number; readonly stdout: string; readonly stderr: string },
-    Error
-  >
+  }) => Effect.Effect<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }, Error>
   readonly stop: (input: { readonly id: string }) => Effect.Effect<void, Error>
   readonly destroy: (input: { readonly id: string }) => Effect.Effect<void, Error>
 }
@@ -58,9 +56,7 @@ export interface Registry {
   readonly get: (provider: string) => Effect.Effect<Interface, ProviderNotFound>
 }
 
-export class RegistryService extends Context.Service<RegistryService, Registry>()(
-  "@opencode/MachineRuntimeRegistry",
-) {}
+export class RegistryService extends Context.Service<RegistryService, Registry>()("@opencode/MachineRuntimeRegistry") {}
 
 export const registry = (runtimes: Readonly<Record<string, Interface>>): Registry => ({
   get: (provider) => {
