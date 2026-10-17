@@ -38,6 +38,9 @@ or personal-session migration is implied by these experiments.
   `database.path: ":memory:"`. A host can instead pass
   `OpenCode.create({ database: { path: "/absolute/private/session.sqlite" } })`.
   Reopen the same private database to retain projected Sessions and pending work.
+  Use a single owning embedded host per database: startup recovery assumes the
+  previous owner is dead. Independent active hosts sharing one database are not
+  fenced against each other; attach clients to the owner instead.
 - [`SessionInbox`](../core/src/session/inbox.ts) durably admits prompts before
   execution; retrying the same compatible input ID adopts the first admission.
 - [`SessionRestart`](../core/src/session/execution/restart.ts) finds unreleased
