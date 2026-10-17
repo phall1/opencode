@@ -51,6 +51,23 @@ replaces outbound transport while exercising the real provider wire parser.
 
 ## Evidence contract
 
+### Independent artifact scoring
+
+An evaluator need not execute candidate code. For bounded configuration tasks,
+collect immutable bytes, reject missing/truncated/oversized or malformed inputs,
+and evaluate them with host-owned, versioned rules. Bind each append-only receipt
+to its artifact and verifier digests. Offline remeasurement must not start a VM,
+invoke a provider, or rewrite the collected evidence. A valid but incorrect
+configuration fails; an unavailable observation is unknown, not a negative score.
+
+This separates the scorer from the actor without making Docker a universal
+dependency. It establishes facts about the collected data, not an uncompromised
+guest or actual running-service behavior. Generic executable-code grading still
+needs its own containment and oracle-integrity acceptance. See
+[current integration and durability limits](../packages/replay/READINESS.md).
+
+### Recording and restoration
+
 - Pin the runtime, policy, instructions, tool contracts, task inputs, and supported
   environment profile. Capture final effective requests, not just pre-hook drafts.
 - Give each observation a stable identity and an owning execution. Serial

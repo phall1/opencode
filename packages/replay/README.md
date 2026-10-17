@@ -3,6 +3,72 @@
 Workspace-private package in the public maintained fork—not a universal world
 replay engine or RL trainer.
 
+For daily-coding integration, owned storage, Session persistence, and a comparison
+with Pi Durable, see [current readiness](READINESS.md). A VM probe is not a durable
+coding Session; metadata traces are not full transcripts or replay capsules.
+
+## Trusted SmolVM artifact evaluator (no Docker)
+
+From the repository root, with an already installed SmolVM wrapper and its bundled
+Alpine rootfs:
+
+```sh
+bun run smolvm:evaluate --help
+bun run smolvm:evaluate /absolute/private/new-run --trust-local-code
+bun run smolvm:evaluate remeasure /absolute/private/new-run measurement-<uuid>.json policy-v2
+```
+
+The output parent must exist and be canonical. The command exclusively creates a
+mode-0700 run directory and mode-0600 artifacts/receipts; it never overwrites a
+previous run. No runtime installation, image pull, Docker, provider call, host
+mount, credential forwarding or guest-network option is requested. This profile
+uses a copied local rootfs with a content inventory digest. It does **not** use
+the unpinned `alpine` registry name or the user's ordinary machine inventory.
+
+The fixed, trusted scenario writes a synthetic service configuration into a
+parent, branches twice and changes only the children. The host freezes at most
+4,096 UTF-8 bytes from each export and scores that data using its own rules:
+
+| Artifact | Public checks | Full policy |
+| --- | --- | --- |
+| Baseline | FAILED | FAILED |
+| General repair | PASSED | PASSED |
+| Public-only repair | PASSED | FAILED |
+
+The full policy also requires auditing and preservation of the synthetic service.
+Unknown/corrupt/missing/truncated observations produce `UNKNOWN`, not a failed
+task. Candidate-supplied score fields do not influence the evaluator. Nothing
+from the artifact is imported or executed on the host, so **this checker does
+not need Docker**. Executing arbitrary repository tests remains a separate,
+containment-sensitive workload.
+
+`run.json` records collection results, input-image identity, private scratch
+inventory when cleanup is uncertain, and exact resource cleanup outcomes.
+`resource-*.started.json` records ownership intent before create/branch;
+`artifact-*.json` and `measurement-*.json` retain frozen evidence and independent
+versioned judgments. Successful cleanup removes children before their parent;
+failure or interruption leaves the run `UNKNOWN`, with no automatic action retry.
+The adapter uses a private HOME/cache/data root: `SMOLVM_DATA_DIR` alone is ignored
+on macOS. Missing resources are safe to clean up; pre-existing named forks are
+not adopted or deleted.
+
+Offline remeasurement needs neither SmolVM nor Docker. It reads bounded regular
+files, validates schemas and artifact hashes, and writes a new receipt without
+changing the original. Digests detect changed bytes relative to the reference;
+they do not authenticate an actor or attest that a running service applied the
+exported configuration. This is a synthetic **artifact evaluator**, not a
+tamper-proof grader or native OpenCode VM-backed coding loop. No persisted RAM
+checkpoint, full network-denial proof, arbitrary untrusted workload, off-host
+backup or training-ready reward is claimed.
+
+Offline tests run in the normal package suite. To additionally exercise real,
+owned SmolVMs and actual guest exit/timeout/cleanup behavior:
+
+```sh
+cd packages/replay
+OPENCODE_REPLAY_SMOLVM=1 bun test test/smolvm-evaluation.test.ts --timeout 120000
+```
+
 ```sh
 cd packages/replay
 bun run demo                       # chooses a fresh temporary output directory

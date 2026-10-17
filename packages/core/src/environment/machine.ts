@@ -15,14 +15,14 @@ export class ProviderNotFound extends Schema.TaggedError<ProviderNotFound>()(
 
 export interface Interface {
   /**
-   * Portable name of the backend that can create, fork and restore the
-   * supplied machine instances, e.g. `smol`, `forkd`, or `cube`.
+   * Backend name for this lifecycle implementation. This port does not itself
+   * promise checkpoint/restore support, equivalent isolation or portable images.
    */
   readonly provider: string
   /**
-   * Create or adopt a base machine from an immutable image. Providers key
-   * the resource by `image` and a provider-private name so repeated calls
-   * are idempotent.
+   * Allocate a new base machine. Repeated calls are not inherently idempotent:
+   * an ambiguous result requires reconciling the driver's recorded resource
+   * intent, not blindly repeating create. Image preparation is backend-specific.
    */
   readonly create: (input: {
     readonly image: string
@@ -30,8 +30,9 @@ export interface Interface {
     readonly cpus?: number
   }) => Effect.Effect<{ readonly id: string }, Error>
   /**
-   * Create a copy-on-write or restored child from a stopped or warmed
-   * parent. Parent identity stays intact; only the returned child mutates.
+   * Create a child without changing the parent's identity. The backend owns
+   * readiness requirements and must document exactly which state is copied,
+   * shared or excluded; this type alone does not prove full-world isolation.
    */
   readonly fork: (input: { readonly parent: string; readonly name?: string }) =>
     Effect.Effect<{ readonly id: string }, Error>

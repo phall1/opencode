@@ -52,6 +52,8 @@ directories, never from the repository root.
 ## The fundamentals
 
 The composition and acceptance contract is [specs/replay-native.md](specs/replay-native.md).
+Current integration and persistence limits, including the distinction from Pi
+Durable, are in [replay readiness](packages/replay/READINESS.md).
 
 1. **Execution:** OpenCode's normal session runner, provider request encoding and
    parsing, permissions, and tool dispatch. Evaluation does not get a second
