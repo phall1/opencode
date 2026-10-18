@@ -4,7 +4,8 @@ import { plugin as opentui, recommended } from "opentui-lint"
 // Proof run of opentui-lint (npm) over the Solid TUI. `spinner` is registered
 // at runtime by opentui-spinner/solid and `title_shimmer` by extend() in
 // component/title-shimmer.tsx, both outside the linted file, so they are
-// declared here instead of per-file.
+// declared here instead of per-file. `context.Provider` is a Solid context
+// component; the rule misreads lowercase member-expression JSX as an element.
 export default [
   {
     files: ["packages/tui/**/*.{ts,tsx}"],
@@ -16,7 +17,7 @@ export default [
     settings: {
       opentui: {
         framework: "solid",
-        extendedElements: ["spinner", "title_shimmer"],
+        extendedElements: ["spinner", "title_shimmer", "context.Provider"],
       },
     },
     rules: recommended,
