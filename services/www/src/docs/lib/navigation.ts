@@ -51,7 +51,6 @@ export const docsSections: DocsSection[] = [
           { title: "Permissions", slug: "permissions" },
           { title: "Policies", slug: "policies" },
           { title: "Instructions", slug: "instructions" },
-          { title: "Sharing", slug: "sharing" },
           { title: "Warming", slug: "warming" },
         ],
       },
@@ -166,8 +165,11 @@ export const docsSections: DocsSection[] = [
   },
 ]
 
+// Prerendered pages are served as static assets, which redirect the trailing-slash form.
+const assetSlugs = new Set(["api"])
+
 export function docsHref(slug: string, anchor?: string) {
-  const path = slug === "index" ? "" : `${slug.replace(/\/index$/, "")}/`
+  const path = slug === "index" ? "" : `${slug.replace(/\/index$/, "")}${assetSlugs.has(slug) ? "" : "/"}`
   return `${import.meta.env.BASE_URL}docs/${path}${anchor ? `#${anchor}` : ""}`
 }
 
