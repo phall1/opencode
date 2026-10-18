@@ -13,6 +13,7 @@ interface Stored {
 
 export const make = (provider = "memory", options?: { memoryMB?: number }) => {
   const machines = new Map<string, Stored>()
+  const checkpoints = new Map<string, Stored>()
   let next = 0
 
   const resolve = (id: string) =>
@@ -69,6 +70,22 @@ export const make = (provider = "memory", options?: { memoryMB?: number }) => {
       Effect.gen(function* () {
         const machine = yield* resolve(id)
         machine.state = "stopped"
+      }),
+    checkpoint: ({ id, destination }) =>
+      Effect.gen(function* () {
+        const machine = yield* resolve(id)
+        const checkpointID = `${destination}:${machine.id}`
+        checkpoints.set(checkpointID, { ...machine })
+        return { checkpoint: checkpointID }
+      }),
+    restore: ({ checkpoint, name }) =>
+      Effect.gen(function* () {
+        const source = checkpoints.get(checkpoint)
+        if (!source) yield* Effect.fail(new MachineRuntime.Error({ message: "Checkpoint not found" }))
+        const parentMachine: Stored = source as Stored
+        const id = name ?? `${provider}-${++next}`
+        machines.set(id, { ...parentMachine, id })
+        return { id }
       }),
     destroy: ({ id }) =>
       Effect.sync(() => {

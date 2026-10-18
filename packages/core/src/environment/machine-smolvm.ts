@@ -177,6 +177,21 @@ export const make = (options: Options) => {
         Effect.asVoid,
       ),
     destroy: ({ id }) => validName(id).pipe(Effect.flatMap(remove)),
+    checkpoint: ({ id, destination }) =>
+      validName(id).pipe(
+        Effect.flatMap(() =>
+          run(["machine", "checkpoint", "--name", id, "-o", destination], 30_000).pipe(
+            Effect.map(() => ({ checkpoint: destination })),
+          ),
+        ),
+      ),
+    restore: ({ checkpoint, name }) =>
+      Effect.gen(function* () {
+        const id = yield* validName(name ?? fresh())
+        yield* run(["machine", "create", "--name", id, "--from", checkpoint])
+        yield* run(["machine", "start", "--name", id, "--branchable"])
+        return { id }
+      }),
   })
 }
 
