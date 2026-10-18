@@ -33,6 +33,9 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Lint and typecheck
         run: bun run check
+      - name: Artifact evaluator and Session storage without Docker or microVMs
+        working-directory: packages/replay
+        run: bun test test/artifact-evaluator.test.ts test/smolvm-evaluation.test.ts test/session-durability.test.ts --timeout 60000 --only-failures
       - name: HTTP recorder regression tests
         working-directory: packages/http-recorder
         run: bun test --timeout 30000 --only-failures
