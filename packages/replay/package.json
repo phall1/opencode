@@ -14,7 +14,7 @@
     "repo-demo": "bun run script/repo-demo.ts",
     "isolation-demo": "bun run script/isolation-demo.ts",
     "test": "bun test --timeout 60000",
-    "typecheck": "tsgo -b"
+    "typecheck": "tsc -b"
   },
   "dependencies": {
     "@opencode/ai": "workspace:*",
@@ -30,6 +30,6 @@
   "devDependencies": {
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
-    "@typescript/native-preview": "catalog:"
+    "@typescript/native": "catalog:"
   }
 }

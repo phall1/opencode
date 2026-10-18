@@ -24,6 +24,8 @@ export type ProviderCompaction = { type: "summary" } | { type: "native" }
 
 export type ProviderTransport = "http" | "websocket"
 
+export type ProviderEncoding = "zstd" | "gzip" | "none"
+
 export type AgentColor = string
 
 export type PermissionEffect = "allow" | "deny" | "ask"
@@ -164,11 +166,17 @@ export type ModelReasoningField = "reasoning" | "reasoning_content" | "reasoning
 
 export type ModelMaxTokensField = "max_completion_tokens" | "max_tokens"
 
-export type ModelCapabilities = { tools: boolean; input: Array<string>; output: Array<string> }
+export type ModelCacheFormat = "anthropic" | "alibaba"
+
+export type ModelCapabilities = { tools: boolean; input: Array<string>; output: Array<string>; temperature?: boolean }
 
 export type MoneyUSDPerMillionTokens = number
 
 export type GenerateTextResponse = { data: { text: string } }
+
+export type VoiceWebRTCTransport = { type: "webrtc"; sdp: string }
+
+export type VoiceWebSocketTransport = { type: "websocket"; url: string; token: string; expiresAt: number }
 
 export type IntegrationID = string
 
@@ -234,7 +242,7 @@ export type ProjectIcon = { url?: string; override?: string; color?: string }
 
 export type ProjectCommands = { start?: string }
 
-export type ProjectTime = { created: number; updated: number; active: number }
+export type ProjectTime = { created: number; updated: number; active: number; archived?: number }
 
 export type PermissionID = string
 
@@ -294,7 +302,9 @@ export type McpProtocol = "legacy" | "auto" | "2026-07-28"
 
 export type ConfigWorktree = { directory: string }
 
-export type ConfigModelCapabilities = { tools?: boolean; input?: Array<string>; output?: Array<string> }
+export type ConfigModelReasoning =
+  | { supported: false }
+  | { supported: true; toggle?: boolean; effort?: Array<string>; budget?: { min?: number; max?: number } }
 
 export type ConfigShellOption = { path: string; name: string; acceptable: boolean }
 
@@ -324,17 +334,16 @@ export type SessionProviderContextProvenance = {
   endpoint: string
 }
 
-export type ModelSettings = { compaction?: ProviderCompaction } & { [x: string]: any }
-
-export type ConfigModelSettings = { compaction?: ProviderCompaction } & { [x: string]: JsonValue | null }
-
 export type ProviderSettings = {
   timeout?: number | false
   headerTimeout?: number | false
   chunkTimeout?: number | false
   compaction?: ProviderCompaction
   transport?: ProviderTransport
+  encoding?: ProviderEncoding
 } & { [x: string]: any }
+
+export type ModelSettings = { compaction?: ProviderCompaction; encoding?: ProviderEncoding } & { [x: string]: any }
 
 export type ConfigProviderSettings = {
   timeout?: number | false
@@ -342,7 +351,12 @@ export type ConfigProviderSettings = {
   chunkTimeout?: number | false
   compaction?: ProviderCompaction
   transport?: ProviderTransport
+  encoding?: ProviderEncoding
 } & { [x: string]: JsonValue | null }
+
+export type ConfigModelSettings = { compaction?: ProviderCompaction; encoding?: ProviderEncoding } & {
+  [x: string]: JsonValue | null
+}
 
 export type PermissionRule = { action: string; resource: string; effect: PermissionEffect }
 
@@ -626,8 +640,19 @@ export type ModelCompatibility = {
   requireFinishReason?: boolean
   requireAssistantAfterTool?: boolean
   supportsPromptCacheKey?: boolean
+  cacheFormat?: ModelCacheFormat
   supportsThinkingBlockBinding?: boolean
   supportsEffortUpdates?: boolean
+}
+
+export type ProviderCompatibility = {
+  reasoningField?: ModelReasoningField
+  requireReasoning?: boolean
+  maxTokensField?: ModelMaxTokensField
+  requireFinishReason?: boolean
+  requireAssistantAfterTool?: boolean
+  supportsPromptCacheKey?: boolean
+  cacheFormat?: ModelCacheFormat
 }
 
 export type ModelCost = {
@@ -636,6 +661,8 @@ export type ModelCost = {
   output: MoneyUSDPerMillionTokens
   cache: { read: MoneyUSDPerMillionTokens; write: MoneyUSDPerMillionTokens }
 }
+
+export type VoiceTransport = VoiceWebRTCTransport | VoiceWebSocketTransport
 
 export type IntegrationCommandMethod = {
   id: IntegrationMethodID
@@ -827,6 +854,14 @@ export type VcsInfo = { provider?: string; branch: VcsBranch }
 
 export type WebSearchProvider = { id: WebSearchID; name: string }
 
+export type ConfigModelCapabilities = {
+  tools?: boolean
+  input?: Array<string>
+  output?: Array<string>
+  temperature?: boolean
+  reasoning?: ConfigModelReasoning
+}
+
 export type SessionMessageLocationSwitched = {
   id: SessionMessageID
   metadata?: { [x: string]: JsonValue }
@@ -874,27 +909,15 @@ export type SessionMessageModelSelected = {
 
 export type SessionProviderContext = { version: 1; provenance: SessionProviderContextProvenance; messages: JsonValue }
 
-export type ModelVariant = {
-  id: string
-  settings?: ModelSettings
-  headers?: { [x: string]: string }
-  body?: { [x: string]: any }
-}
-
 export type ProviderRequest = {
   settings: ProviderSettings
   headers: { [x: string]: string }
   body: { [x: string]: any }
 }
 
-export type ProviderInfo = {
-  id: ProviderID
-  canonical?: ProviderID
-  integrationID?: IntegrationID
-  name: string
-  activation: "auto" | "enabled" | "disabled"
-  package: string
-  settings?: ProviderSettings
+export type ModelVariant = {
+  id: string
+  settings?: ModelSettings
   headers?: { [x: string]: string }
   body?: { [x: string]: any }
 }
@@ -1753,7 +1776,6 @@ export type TuiCommandExecute = {
     command:
       | "session.list"
       | "session.new"
-      | "session.share"
       | "session.interrupt"
       | "session.background"
       | "session.compact"
@@ -1911,6 +1933,21 @@ export type CredentialKey = {
   metadata?: { [x: string]: JsonValue }
   configuration?: FormAnswer
 }
+
+export type ProviderInfo = {
+  id: ProviderID
+  canonical?: ProviderID
+  integrationID?: IntegrationID
+  name: string
+  activation: "auto" | "enabled" | "disabled"
+  package: string
+  compatibility?: ProviderCompatibility
+  settings?: ProviderSettings
+  headers?: { [x: string]: string }
+  body?: { [x: string]: any }
+}
+
+export type VoiceSessionResponse = { data: { transport: VoiceTransport } }
 
 export type ConnectionInfo = ConnectionCredentialInfo | ConnectionEnvInfo
 
@@ -2134,6 +2171,11 @@ export type ConfigEntry =
         enterprise?: { url?: string }
         username?: string
         permissions?: PermissionRuleset
+        policies?: Array<{
+          action: "provider.use" | "tool.use" | "integration.use"
+          resource: string
+          effect: "allow" | "deny"
+        }>
         agents?: {
           [x: string]: {
             model?: string | { providerID: string; model: string; variant?: string }
@@ -2241,6 +2283,7 @@ export type ConfigEntry =
             name?: string
             env?: Array<string>
             package?: string
+            compatibility?: ProviderCompatibility
             settings?: ConfigProviderSettings
             headers?: { [x: string]: string }
             body?: { [x: string]: JsonValue }
@@ -2249,6 +2292,7 @@ export type ConfigEntry =
                 modelID?: string
                 family?: string
                 name?: string
+                releaseDate?: string
                 compatibility?: ModelCompatibility
                 package?: string
                 settings?: ConfigModelSettings
@@ -5662,6 +5706,7 @@ export type MessageListInput = {
       | "shell"
       | "assistant"
       | "compaction"
+      | "idle"
       | undefined
   }["limit"]
   readonly order?: {
@@ -5679,6 +5724,7 @@ export type MessageListInput = {
       | "shell"
       | "assistant"
       | "compaction"
+      | "idle"
       | undefined
   }["order"]
   readonly cursor?: {
@@ -5696,6 +5742,7 @@ export type MessageListInput = {
       | "shell"
       | "assistant"
       | "compaction"
+      | "idle"
       | undefined
   }["cursor"]
   readonly type?: {
@@ -5713,6 +5760,7 @@ export type MessageListInput = {
       | "shell"
       | "assistant"
       | "compaction"
+      | "idle"
       | undefined
   }["type"]
 }
@@ -5743,6 +5791,32 @@ export type GenerateTextInput = {
 }
 
 export type GenerateTextOutput = GenerateTextResponse["data"]
+
+export type VoiceSessionInput = {
+  readonly model: {
+    readonly model: string
+    readonly session?: { readonly [x: string]: unknown } | undefined
+    readonly transport:
+      | { readonly type: "webrtc"; readonly sdp: string; readonly dcid?: number | undefined }
+      | { readonly type: "websocket" }
+  }["model"]
+  readonly session?: {
+    readonly model: string
+    readonly session?: { readonly [x: string]: unknown } | undefined
+    readonly transport:
+      | { readonly type: "webrtc"; readonly sdp: string; readonly dcid?: number | undefined }
+      | { readonly type: "websocket" }
+  }["session"]
+  readonly transport: {
+    readonly model: string
+    readonly session?: { readonly [x: string]: unknown } | undefined
+    readonly transport:
+      | { readonly type: "webrtc"; readonly sdp: string; readonly dcid?: number | undefined }
+      | { readonly type: "websocket" }
+  }["transport"]
+}
+
+export type VoiceSessionOutput = VoiceSessionResponse["data"]
 
 export type ProviderListInput = {
   readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]
@@ -6126,6 +6200,8 @@ export type CredentialActivateOutput = void
 export type CredentialRemoveInput = { readonly credentialID: { readonly credentialID: string }["credentialID"] }
 
 export type CredentialRemoveOutput = void
+
+export type ProjectListInput = { readonly archived?: { readonly archived?: boolean | undefined }["archived"] }
 
 export type ProjectListOutput = Array<Project>
 

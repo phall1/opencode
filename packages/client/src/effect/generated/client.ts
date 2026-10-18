@@ -115,6 +115,8 @@ import type {
   ModelDefaultOutput,
   GenerateTextInput,
   GenerateTextOutput,
+  VoiceSessionInput,
+  VoiceSessionOutput,
   ProviderListInput,
   ProviderListOutput,
   ProviderGetInput,
@@ -164,6 +166,7 @@ import type {
   CredentialActivateOutput,
   CredentialRemoveInput,
   CredentialRemoveOutput,
+  ProjectListInput,
   ProjectListOutput,
   ProjectUpdateInput,
   ProjectUpdateOutput,
@@ -862,6 +865,18 @@ const EndpointGenerateText = (raw: RawClient["server.generate"]) => (input: Gene
 
 const adaptGroupGenerate = (raw: RawClient["server.generate"]) => ({ text: EndpointGenerateText(raw) })
 
+const EndpointVoiceSession = (raw: RawClient["server.voice"]) => (input: VoiceSessionInput) =>
+  preserveEffect<VoiceSessionOutput>()(
+    raw["voice.session"]({
+      payload: { model: input["model"], session: input["session"], transport: input["transport"] },
+    }).pipe(
+      Effect.mapError(mapClientError),
+      Effect.map((value) => value.data),
+    ),
+  )
+
+const adaptGroupVoice = (raw: RawClient["server.voice"]) => ({ session: EndpointVoiceSession(raw) })
+
 const EndpointProviderList = (raw: RawClient["server.provider"]) => (input?: ProviderListInput) =>
   preserveEffect<ProviderListOutput>()(
     raw["provider.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
@@ -1102,8 +1117,10 @@ const adaptGroupCredential = (raw: RawClient["server.credential"]) => ({
   remove: EndpointCredentialRemove(raw),
 })
 
-const EndpointProjectList = (raw: RawClient["server.project"]) => () =>
-  preserveEffect<ProjectListOutput>()(raw["project.list"]({}).pipe(Effect.mapError(mapClientError)))
+const EndpointProjectList = (raw: RawClient["server.project"]) => (input?: ProjectListInput) =>
+  preserveEffect<ProjectListOutput>()(
+    raw["project.list"]({ query: { archived: input?.["archived"] } }).pipe(Effect.mapError(mapClientError)),
+  )
 
 const EndpointProjectUpdate = (raw: RawClient["server.project"]) => (input: ProjectUpdateInput) =>
   preserveEffect<ProjectUpdateOutput>()(
@@ -1613,6 +1630,7 @@ const adaptClient = (raw: RawClient) => ({
   message: adaptGroupMessage(raw["server.message"]),
   model: adaptGroupModel(raw["server.model"]),
   generate: adaptGroupGenerate(raw["server.generate"]),
+  voice: adaptGroupVoice(raw["server.voice"]),
   provider: adaptGroupProvider(raw["server.provider"]),
   integration: adaptGroupIntegration(raw["server.integration"]),
   mcp: adaptGroupMcp(raw["server.mcp"]),

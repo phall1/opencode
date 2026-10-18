@@ -11,9 +11,11 @@ Use Bun for execution/tests, Oxc for linting, and the native TypeScript checker
 already pinned by the workspace. Replay code has an Oxc complexity ceiling of
 10 per function; do not add a second runtime, test framework, or lint pipeline.
 
-- **Maintained base:** `v2`; **upstream:** `anomalyco/opencode`, branch `v2`.
+- **Maintained base:** `v2`; **upstream:** `anomalyco/opencode`, branch `dev`.
+  Upstream moved its active line from `v2` to `dev` (its `v2` branch is frozen
+  at 2026-10-10); sync with `git merge upstream/dev`.
 - Work on short feature branches in dedicated worktrees. Compare changes against
-  `origin/v2`, not upstream's legacy `dev` branch.
+  `origin/v2`.
 - Merge upstream updates rather than rewriting published fork history. Preserve
   fork-specific behavior, regenerate the lockfile, then run `bun run check`.
 - Pull requests target **this fork**. An upstream PR requires separate explicit

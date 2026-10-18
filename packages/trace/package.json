@@ -10,7 +10,7 @@
   "scripts": {
     "test": "bun test --timeout 60000",
     "demo": "bun run script/demo.ts",
-    "typecheck": "tsgo -b"
+    "typecheck": "tsc -b"
   },
   "dependencies": {
     "@opencode/core": "workspace:*",
@@ -23,6 +23,6 @@
     "@opencode/sdk": "workspace:*",
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
-    "@typescript/native-preview": "catalog:"
+    "@typescript/native": "catalog:"
   }
 }
