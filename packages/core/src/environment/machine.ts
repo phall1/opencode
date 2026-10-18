@@ -48,6 +48,18 @@ export interface Interface {
   }) => Effect.Effect<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }, Error>
   readonly stop: (input: { readonly id: string }) => Effect.Effect<void, Error>
   readonly destroy: (input: { readonly id: string }) => Effect.Effect<void, Error>
+  /**
+   * Persist or export the current machine state. Optional because backends have
+   * different snapshot formats; callers must inspect availability and coverage.
+   */
+  readonly checkpoint?: (input: {
+    readonly id: string
+    readonly destination: string
+  }) => Effect.Effect<{ readonly checkpoint: string }, Error>
+  readonly restore?: (input: {
+    readonly checkpoint: string
+    readonly name?: string
+  }) => Effect.Effect<{ readonly id: string }, Error>
 }
 
 export const make = (runtime: Interface) => runtime
