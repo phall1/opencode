@@ -21,6 +21,7 @@ describe("fork-sync", () => {
 
   test("lands a clean merge only after local checks and CI, then disables new upstream workflows", () => {
     const fx = fixture()
+    fx.forkCommit("fork.txt", "fork-only work")
     fx.upstreamCommit("upstream.txt", "new upstream work")
     const result = fx.run()
     expect(result.exitCode).toBe(0)
@@ -100,9 +101,19 @@ function fixture() {
       `esac`,
     ].join("\n"),
   )
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }
+  // CI runners have no git identity; the script's merge commits need one.
+  const env = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_AUTHOR_NAME: "fork-sync",
+    GIT_AUTHOR_EMAIL: "fork-sync@example.invalid",
+    GIT_COMMITTER_NAME: "fork-sync",
+    GIT_COMMITTER_EMAIL: "fork-sync@example.invalid",
+  }
   const git = (cwd: string, ...args: string[]) => {
-    const result = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+    const result = Bun.spawnSync(["git", ...args], { cwd, env })
     if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr.toString()}`)
     return result.stdout.toString()
   }
