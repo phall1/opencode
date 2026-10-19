@@ -167,9 +167,11 @@ it.live("unselected Sessions do not consume queue, counters or pseudonym state; 
           }),
         { discard: true },
       )
+      yield* bus.publish(Tool, { ...data, sessionID: `ses_${SECRET.repeat(10)}` })
       expect(collector.health().observed).toBe(0)
       expect(collector.health().unsupported).toBe(0)
       expect(collector.health().collectionFailures).toBe(0)
+      expect(collector.health().dropped).toBe(0)
       yield* bus.publish(Tool, data)
       yield* bus.publish(Tool, { ...data, assistantMessageID: "msg_other" })
       yield* collector.close
@@ -179,6 +181,7 @@ it.live("unselected Sessions do not consume queue, counters or pseudonym state; 
       expect(events).toHaveLength(2)
       expect(events[0].tool).not.toBe(events[1].tool)
       expect(events[0].session).toBe(events[1].session)
+      expect(collector.health().complete).toBe(true)
     }),
   )
 })
@@ -201,6 +204,23 @@ it.live("all-host selection is explicit and Session qualifiers prevent message/c
       expect(events[0].session).not.toBe(events[1].session)
       expect(events[0].message).not.toBe(events[1].message)
       expect(events[0].tool).not.toBe(events[1].tool)
+    }),
+  )
+})
+
+it.live("all-host capture still rejects oversized Session IDs without breaking publication", () => {
+  const sink = memorySink()
+  return withCollector({ ...options, selection: { allHostSessions: true } }, sink, (collector, bus) =>
+    Effect.gen(function* () {
+      yield* bus.publish(Tool, { ...data, sessionID: `ses_${SECRET.repeat(10)}` })
+      yield* bus.publish(Tool, data)
+      yield* collector.close
+      expect(collector.health().observed).toBe(2)
+      expect(collector.health().collectionFailures).toBe(1)
+      expect(collector.health().dropped).toBe(1)
+      expect(collector.health().written).toBe(1)
+      expect(collector.health().complete).toBe(false)
+      expect(sink.lines.join("")).not.toContain(SECRET)
     }),
   )
 })

@@ -116,6 +116,15 @@ function fixture() {
   // CI runners have no git identity; the script's merge commits need one.
   const env = {
     ...process.env,
+    // Never launch the scheduler's real repair agent or use its target configuration.
+    FORK_SYNC_AGENT: "",
+    FORK_SYNC_REPO: "phall1/opencode",
+    FORK_SYNC_BASE: "v2",
+    FORK_SYNC_UPSTREAM_URL: upstream,
+    FORK_SYNC_UPSTREAM_BRANCH: "dev",
+    FORK_SYNC_DRY_RUN: "0",
+    FAKE_HAS_ISSUES: "true",
+    FAKE_CHECK_NEEDS: "",
     PATH: `${bin}:${process.env.PATH}`,
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
