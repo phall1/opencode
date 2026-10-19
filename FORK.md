@@ -22,8 +22,9 @@ already pinned by the workspace. Replay code has an Oxc complexity ceiling of
   it merges `upstream/dev` into a fresh `upstream-sync-<sha>` branch, resolves
   lockfile-only conflicts, runs `bun run check`, opens a PR, and merges it only
   after `replay-native` CI passes; it then disables newly arrived upstream
-  workflows. Other conflicts or failures update the "Upstream sync needs
-  attention" issue. With `FORK_SYNC_AGENT` set, an agent may attempt the repair,
+  workflows. Other conflicts or failures are logged (the dotfiles wrapper
+  notifies) and update the "Upstream sync needs attention" issue when the
+  repository has issues enabled. With `FORK_SYNC_AGENT` set, an agent may attempt the repair,
   but its result is only proposed as a PR, never auto-merged.
 - Pull requests target **this fork**. An upstream PR requires separate explicit
   permission. Never treat maintaining a fork as permission to publish upstream.
