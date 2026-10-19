@@ -7,7 +7,7 @@ import { TraceRecords } from "./records"
 
 export const boundedID = Schema.String.check(Schema.isMaxLength(256))
 export const SelectedSession = SessionID.check(Schema.isMaxLength(256))
-const ref = Schema.Struct({ sessionID: SelectedSession })
+const ref = Schema.Struct({ sessionID: SessionID })
 const supported = new Set<string>(TraceRecords.Types)
 
 // Decode only this finite projection of each canonical schema, never its body.
@@ -64,6 +64,7 @@ export function makeProjection(selected: (sessionID: string) => boolean) {
     if (!event.type.startsWith("session.")) return
     const sessionID = Schema.decodeUnknownSync(ref)(event.data).sessionID
     if (!selected(sessionID)) return
+    Schema.decodeUnknownSync(boundedID)(sessionID)
     if (event.type.length > 64) return "unsupported"
     if (!supported.has(event.type)) return "unsupported"
     const input = decode(event)
