@@ -23,7 +23,7 @@ describe("fork-sync", () => {
     const fx = fixture()
     fx.forkCommit("fork.txt", "fork-only work")
     fx.upstreamCommit("upstream.txt", "new upstream work")
-    const result = fx.run()
+    const result = fx.run({ FAKE_HAS_ISSUES: "false" })
     expect(result.exitCode).toBe(0)
     const calls = fx.calls().join("\n")
     expect(calls).toContain("pr create --repo phall1/opencode --base v2 --head upstream-sync-")
@@ -53,6 +53,17 @@ describe("fork-sync", () => {
     expect(result.exitCode).toBe(2)
     expect(fx.calls().join("\n")).toMatch(/issue create --repo phall1\/opencode --title Upstream sync needs attention --body .*conflicts: shared\.txt/)
     expect(fx.calls().join("\n")).not.toContain("pr merge")
+    fx.expectParked()
+  })
+
+  test("without repository issues, attention is logged and nothing fails on the issue API", () => {
+    const fx = fixture()
+    fx.forkCommit("shared.txt", "fork change")
+    fx.upstreamCommit("shared.txt", "upstream change")
+    const result = fx.run({ FAKE_HAS_ISSUES: "false" })
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain("conflicts: shared.txt")
+    expect(fx.calls().join("\n")).not.toContain("issue ")
     fx.expectParked()
   })
 
@@ -98,6 +109,7 @@ function fixture() {
       `  "pr create") echo https://example.invalid/pr/1 ;;`,
       `  "pr checks") echo replay ;;`,
       `  "workflow list") printf '%s\\n' .github/workflows/replay-native.yml .github/workflows/models-snapshot.yml ;;`,
+      `  "api repos/phall1/opencode") echo "\${FAKE_HAS_ISSUES:-true}" ;;`,
       `esac`,
     ].join("\n"),
   )

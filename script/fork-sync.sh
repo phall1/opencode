@@ -10,7 +10,8 @@
 #                                  are never auto-merged
 #
 # Clean merges land only after `bun run check` passes locally and the fork's
-# CI passes on the PR. Anything else opens or updates the tracking issue.
+# CI passes on the PR. Anything else opens or updates the tracking issue when
+# the repository has issues enabled; the message is always logged to stderr.
 # History is never rewritten: every attempt uses a fresh branch name.
 # Exit: 0 current or landed, 2 needs attention, 3 PR left for review.
 set -euo pipefail
@@ -142,10 +143,14 @@ disable_new_workflows() {
 
 failure_summary() { printf '%s' "${FAILURE:-unknown failure}"; }
 
+issues_enabled() {
+  [[ "$(gh api "repos/$repo" --jq .has_issues 2>/dev/null)" == true ]]
+}
+
 attention() {
   local message="$1" number
   log "$message"
-  if ! dry; then
+  if ! dry && issues_enabled; then
     number="$(gh issue list --repo "$repo" --state open --search "in:title \"$issue_title\"" --json number --jq '.[0].number')"
     if [[ -n "$number" ]]; then
       gh issue comment "$number" --repo "$repo" --body "$message" >/dev/null
@@ -162,6 +167,7 @@ attention() {
 
 close_issue() {
   local number
+  issues_enabled || return 0
   number="$(gh issue list --repo "$repo" --state open --search "in:title \"$issue_title\"" --json number --jq '.[0].number')"
   [[ -z "$number" ]] || gh issue close "$number" --repo "$repo" --comment 'Resolved by a landed upstream sync.' >/dev/null
 }
