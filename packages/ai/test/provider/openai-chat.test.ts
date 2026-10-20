@@ -64,6 +64,16 @@ describe("OpenAI Chat route", () => {
     }),
   )
 
+  it.effect("omits stream usage options when compatibility disables them", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({ model: LanguageModel.update(model, { compatibility: { streamUsage: false } }), prompt: "Hello" }),
+      )
+
+      expect(prepared.body).not.toHaveProperty("stream_options")
+    }),
+  )
+
   it.effect("sends store only to OpenAI and Azure unless compatibility opts in", () =>
     Effect.gen(function* () {
       const compatible = OpenAICompatible.configure({ baseURL: "https://api.compatible.test/v1", apiKey: "test" })

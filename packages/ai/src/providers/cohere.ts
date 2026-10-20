@@ -42,7 +42,6 @@ export const configure = (input: LanguageModelOptions = {}) => {
         id: modelID,
         compatibility: {
           maxTokensField: "max_tokens",
-          supportsUsageInStreaming: true,
           reasoningField: "reasoning_content",
           supportsStrictMode: false,
         },
