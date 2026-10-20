@@ -714,46 +714,20 @@ const detectMaxTokensField = (
   return "max_completion_tokens"
 }
 
+// `store` defaults to false on OpenAI and Azure, but org-level logging can still
+// store requests that omit it, so send an explicit `store: false` there. Strict
+// OpenAI-style APIs reject the field with a 400, so omit it everywhere else.
 const detectSupportsStore = (provider: string, baseURL: string | undefined): boolean => {
   const p = provider.toLowerCase()
   const url = (baseURL ?? "").toLowerCase()
-  const isNvidia = p === "nvidia" || url.includes("integrate.api.nvidia.com")
-  const isMoonshot = p === "moonshotai" || p === "moonshotai-cn" || url.includes("api.moonshot.")
-  const isTogether = p === "togetherai" || p === "together" || url.includes("api.together.")
-  const isZai =
-    p === "zai" ||
-    p === "zai-coding-plan" ||
-    p === "zhipuai" ||
-    p === "zhipuai-coding-plan" ||
-    url.includes("api.z.ai") ||
-    url.includes("open.bigmodel.cn")
-  const isDeepSeek = p === "deepseek" || url.includes("deepseek.com")
-  const isCerebras = p === "cerebras" || url.includes("cerebras.ai")
-  const isXai = p === "xai" || url.includes("api.x.ai")
-  const isChutes = p === "chutes" || url.includes("chutes.ai")
-  const isCloudflareWorkersAI = p === "cloudflare-workers-ai" || url.includes("api.cloudflare.com")
-  const isCloudflareAiGateway = p === "cloudflare-ai-gateway" || url.includes("gateway.ai.cloudflare.com")
-  const isVercelAiGateway =
-    p === "vercel-ai-gateway" || url.includes("ai-gateway.vercel.sh") || url.includes("vercel.sh")
-  const isAntLing = p === "ant-ling" || url.includes("api.ant-ling.com")
-  const isOpencode = p === "opencode" || url.includes("opencode.ai")
-  const isGemini = url.includes("generativelanguage.googleapis.com")
-  const isNonStandard =
-    isGemini ||
-    isNvidia ||
-    isCerebras ||
-    isXai ||
-    isTogether ||
-    isChutes ||
-    isDeepSeek ||
-    isZai ||
-    isMoonshot ||
-    isOpencode ||
-    isCloudflareWorkersAI ||
-    isCloudflareAiGateway ||
-    isVercelAiGateway ||
-    isAntLing
-  return !isNonStandard
+  return (
+    p === "openai" ||
+    p === "azure" ||
+    url.includes("api.openai.com") ||
+    url.includes(".openai.azure.com") ||
+    url.includes(".cognitiveservices.azure.com") ||
+    url.includes(".services.ai.azure.com")
+  )
 }
 
 const detectSupportsUsageInStreaming = (): boolean => true
@@ -792,11 +766,7 @@ const lowerOptions = (request: LLMRequest, supportsStore: boolean) => {
   const cacheKey =
     (request.model.compatibility?.supportsPromptCacheKey ?? false) ? ProviderShared.promptCacheKey(request) : undefined
   return {
-    ...(supportsStore && options.store !== undefined ? { store: options.store } : {}),
-    // For providers that support `store`, ensure stateless `store:false` is sent
-    // even when no explicit `providerOptions.store` was supplied, mirroring the
-    // native OpenAI Chat default. Non-standard providers omit `store` entirely.
-    ...(supportsStore && options.store === undefined ? { store: false } : {}),
+    ...(supportsStore ? { store: options.store ?? false } : {}),
     ...(cacheKey ? { prompt_cache_key: cacheKey } : {}),
     ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
   }
