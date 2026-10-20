@@ -730,8 +730,6 @@ const detectSupportsStore = (provider: string, baseURL: string | undefined): boo
   )
 }
 
-const detectSupportsUsageInStreaming = (): boolean => true
-
 const detectSupportsStrictMode = (provider: string, baseURL: string | undefined): boolean => {
   const p = provider.toLowerCase()
   const url = (baseURL ?? "").toLowerCase()
@@ -790,8 +788,6 @@ export const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (
   const detectedMaxTokensField = detectMaxTokensField(provider, baseURL)
   const maxTokensField = request.model.compatibility?.maxTokensField ?? detectedMaxTokensField
   const supportsStore = request.model.compatibility?.supportsStore ?? detectSupportsStore(provider, baseURL)
-  const supportsUsageInStreaming =
-    request.model.compatibility?.supportsUsageInStreaming ?? detectSupportsUsageInStreaming()
   const supportsStrictMode =
     request.model.compatibility?.supportsStrictMode ?? detectSupportsStrictMode(provider, baseURL)
   const zaiToolStream =
@@ -810,7 +806,7 @@ export const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (
         : flattened.tools.map((tool) => lowerTool(tool, lowering, supportsStrictMode)),
     tool_choice: hasActiveTools && request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined,
     stream: true as const,
-    ...(supportsUsageInStreaming ? { stream_options: { include_usage: true } } : {}),
+    ...((request.model.compatibility?.streamUsage ?? true) ? { stream_options: { include_usage: true } } : {}),
     ...(zaiToolStream && hasActiveTools ? { tool_stream: true } : {}),
     ...(maxTokensField === "max_completion_tokens"
       ? { max_completion_tokens: generation?.maxTokens }
