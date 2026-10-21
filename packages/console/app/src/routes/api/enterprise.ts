@@ -6,7 +6,7 @@ import { localeFromRequest } from "~/lib/language"
 
 // SolidStart keeps only the method export from API routes, so the handler lives in lib.
 export async function POST(event: APIEvent) {
-  // Outside production, accept submissions without reaching spam scoring, Salesforce, email, or EmailOctopus.
+  // Outside production, accept submissions without reaching hCaptcha, spam scoring, Salesforce, email, or EmailOctopus.
   if (import.meta.env.DEV || Resource.App.stage !== "production")
     return Response.json({
       success: true,
