@@ -26,12 +26,45 @@ describe("fork-sync", () => {
     const result = fx.run({ FAKE_HAS_ISSUES: "false" })
     expect(result.exitCode).toBe(0)
     const calls = fx.calls().join("\n")
-    expect(calls).toContain("pr create --repo phall1/opencode --base v2 --head upstream-sync-")
+    expect(calls).toContain("pr create --repo phall1/opencode --base v2 --head upstream-sync")
     expect(calls).toMatch(/pr merge https:\/\/example\.invalid\/pr\/1 --repo phall1\/opencode --merge --delete-branch --match-head-commit [0-9a-f]{40}/)
     expect(calls).toContain("workflow disable .github/workflows/models-snapshot.yml")
     expect(calls).not.toContain("workflow disable .github/workflows/replay-native.yml")
-    expect(fx.git("ls-remote", "--heads", "origin", "upstream-sync-*")).toContain("upstream-sync-")
+    expect(fx.git("ls-remote", "--heads", "origin", "refs/heads/upstream-sync")).toContain("refs/heads/upstream-sync")
     fx.expectParked()
+  })
+
+  test("reuses the single sync branch and updates its PR instead of opening another", () => {
+    const fx = fixture()
+    fx.upstreamCommit("upstream.txt", "first upstream work")
+    expect(fx.run({ FAKE_HAS_ISSUES: "false" }).exitCode).toBe(0)
+    fx.upstreamCommit("second.txt", "second upstream work")
+    const second = fx.run({ FAKE_HAS_ISSUES: "false" })
+    expect(second.exitCode).toBe(0)
+    const calls = fx.calls()
+    expect(calls.filter((call) => call.startsWith("pr create"))).toHaveLength(1)
+    expect(calls.filter((call) => call.startsWith("pr edit"))).toEqual([
+      expect.stringContaining("pr edit https://example.invalid/pr/1 --title chore: sync fork with upstream dev"),
+    ])
+    expect(calls.join("\n")).toContain("pr merge https://example.invalid/pr/1 --repo phall1/opencode")
+    expect(fx.git("ls-remote", "--heads", "origin", "refs/heads/upstream-sync")).not.toBe("")
+    fx.expectParked()
+  })
+
+  test("closes PRs left by the earlier one-branch-per-attempt scheme", () => {
+    const fx = fixture()
+    fx.upstreamCommit("upstream.txt", "work")
+    const result = fx.run({
+      FAKE_HAS_ISSUES: "false",
+      FAKE_STALE_PRS: "12\tupstream-sync-abc123\n7\tupstream-sync\n99\tunrelated\n",
+    })
+    expect(result.exitCode).toBe(0)
+    const calls = fx.calls().join("\n")
+    expect(calls).toContain("pr close 12 --repo phall1/opencode --delete-branch")
+    expect(calls).toContain("Superseded by a newer sync attempt.")
+    expect(calls).not.toContain("pr close 7 ")
+    expect(calls).not.toContain("pr close 99 ")
+    expect(result.stderr).toContain("closed superseded sync PR #12")
   })
 
   test("resolves a lockfile-only conflict mechanically", () => {
@@ -99,14 +132,24 @@ function fixture() {
   const log = path.join(root, "calls")
   mkdirSync(bin)
   writeFileSync(log, "")
+  const prs = path.join(root, "prs")
   fake(bin, "bun", `[ "$1" = run ] && [ -n "$FAKE_CHECK_NEEDS" ] && [ ! -f "$FAKE_CHECK_NEEDS" ] && { echo "check failed" >&2; exit 1; }\nexit 0`)
+  // Tracks created PRs so a second run exercises the reuse path for real.
   fake(
     bin,
     "gh",
     [
       `printf '%s\\n' "$*" >> "${log}"`,
       `case "$1 $2" in`,
-      `  "pr create") echo https://example.invalid/pr/1 ;;`,
+      `  "pr create")`,
+      `    echo "$*" >> "${prs}"`,
+      `    echo "https://example.invalid/pr/$(wc -l < "${prs}" | tr -d ' ')" ;;`,
+      `  "pr list")`,
+      `    case "$*" in`,
+      `      *"--head "*) if [ -s "${prs}" ]; then echo "https://example.invalid/pr/$(wc -l < "${prs}" | tr -d ' ')"; fi ;;`,
+      `      *) printf '%s' "\${FAKE_STALE_PRS:-}" ;;`,
+      `    esac ;;`,
+      `  "pr view") git rev-parse HEAD ;;`,
       `  "pr checks") echo replay ;;`,
       `  "workflow list") printf '%s\\n' .github/workflows/replay-native.yml .github/workflows/models-snapshot.yml ;;`,
       `  "api repos/phall1/opencode") echo "\${FAKE_HAS_ISSUES:-true}" ;;`,
@@ -171,7 +214,7 @@ function fixture() {
     expectParked: () => {
       expect(git(work, "status", "--porcelain")).toBe("")
       expect(git(work, "branch", "--show-current").trim()).toBe("")
-      expect(git(work, "branch", "--list", "upstream-sync-*").trim()).toBe("")
+      expect(git(work, "branch", "--list", "upstream-sync*").trim()).toBe("")
     },
   }
 }

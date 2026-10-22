@@ -4,6 +4,7 @@
 #
 #   script/fork-sync.sh            merge, verify, publish, land when clean
 #   FORK_SYNC_DRY_RUN=1 ...        merge and verify locally; publish nothing
+#   FORK_SYNC_BRANCH=...           bot-owned sync branch and PR (upstream-sync)
 #   FORK_SYNC_AGENT='opencode run --auto' ...
 #                                  let an agent repair conflicts or checks;
 #                                  repaired syncs open a PR for review and
@@ -12,7 +13,8 @@
 # Clean merges land only after `bun run check` passes locally and the fork's
 # CI passes on the PR. Anything else opens or updates the tracking issue when
 # the repository has issues enabled; the message is always logged to stderr.
-# History is never rewritten: every attempt uses a fresh branch name.
+# Every attempt reuses one bot-owned branch and PR, so review never fragments;
+# only that branch is force-updated, never the base branch's history.
 # Exit: 0 current or landed, 2 needs attention, 3 PR left for review.
 set -euo pipefail
 
@@ -20,6 +22,7 @@ repo="${FORK_SYNC_REPO:-phall1/opencode}"
 base="${FORK_SYNC_BASE:-v2}"
 upstream_url="${FORK_SYNC_UPSTREAM_URL:-https://github.com/anomalyco/opencode.git}"
 upstream_branch="${FORK_SYNC_UPSTREAM_BRANCH:-dev}"
+sync_branch="${FORK_SYNC_BRANCH:-upstream-sync}"
 issue_title="Upstream sync needs attention"
 # Upstream workflows that arrive with a merge start enabled; only these stay on.
 allowed_workflows=(.github/workflows/replay-native.yml)
@@ -41,8 +44,8 @@ main() {
   fi
   local upstream_sha branch repaired=0
   upstream_sha="$(git rev-parse --short "upstream/$upstream_branch")"
-  branch="upstream-sync-$upstream_sha"
-  log "merging $behind upstream commits into $branch"
+  branch="$sync_branch"
+  log "merging $behind upstream commits ($upstream_sha) into $branch"
   git checkout --quiet -B "$branch" "origin/$base"
 
   if ! merge_upstream || ! verify; then
@@ -51,7 +54,8 @@ main() {
   fi
   dry && { log "dry run: verified $branch locally; nothing published"; park; exit 0; }
 
-  git push --quiet origin "$branch"
+  push_branch "$branch"
+  supersede_other_prs "$branch"
   local pr
   pr="$(open_pr "$branch" "$behind" "$repaired")"
   if [[ "$repaired" == 1 ]]; then
@@ -67,13 +71,42 @@ main() {
   log "landed $pr"
 }
 
-# CI registers a few seconds after the PR opens; "no checks" is not a pass.
+# Only this script owns `upstream-sync`; replacing it advances the single open
+# PR without rewriting any history that has already landed on the base branch.
+push_branch() {
+  local branch="$1" remote_sha
+  remote_sha="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
+  git push --quiet --force-with-lease="refs/heads/$branch:$remote_sha" origin "$branch"
+}
+
+# Earlier runs opened one PR per upstream sha; retire those so a single open PR
+# always describes the current attempt.
+supersede_other_prs() {
+  local branch="$1" number head
+  while IFS=$'\t' read -r number head; do
+    [[ -n "$number" && "$head" != "$branch" ]] || continue
+    if gh pr close "$number" --repo "$repo" --delete-branch --comment 'Superseded by a newer sync attempt.' >/dev/null; then
+      log "closed superseded sync PR #$number ($head)"
+    else
+      log "could not close superseded sync PR #$number ($head)"
+    fi
+  done < <(gh pr list --repo "$repo" --state open --json number,headRefName \
+    --jq '.[] | "\(.number)\t\(.headRefName)"' | awk -F'\t' '$2 ~ /^upstream-sync(-|$)/')
+}
+
+pr_head() { gh pr view "$1" --repo "$repo" --json headRefOid --jq .headRefOid 2>/dev/null; }
+
+# A reused PR keeps checks from its previous head, and CI registers a few
+# seconds after a push, so watch only once the PR reports our commit.
 wait_for_checks() {
-  local pr="$1"
-  for _ in $(seq 1 20); do
+  local pr="$1" head
+  head="$(git rev-parse HEAD)"
+  for _ in $(seq 1 40); do
+    [[ "$(pr_head "$pr")" == "$head" ]] || { sleep 5; continue; }
     [[ -n "$(gh pr checks "$pr" --repo "$repo" --json name --jq '.[].name' 2>/dev/null)" ]] && break
-    sleep 15
+    sleep 5
   done
+  [[ "$(pr_head "$pr")" == "$head" ]] || { FAILURE="PR $pr is not at $head"; return 1; }
   gh pr checks "$pr" --repo "$repo" --watch --interval 30 >/dev/null 2>&1
 }
 
@@ -124,13 +157,17 @@ repair() {
 }
 
 open_pr() {
-  local branch="$1" behind="$2" repaired="$3" existing note=''
+  local branch="$1" behind="$2" repaired="$3" existing title body note=''
   [[ "$repaired" == 1 ]] && note=$'\n\nAn agent repaired conflicts or failing checks. Review before merging; this PR is never auto-merged.'
+  title="chore: sync fork with upstream $upstream_branch"
+  body="Merges $behind commits from upstream/$upstream_branch ($(git rev-parse --short "upstream/$upstream_branch")). Opened by script/fork-sync.sh after a local \`bun run check\`.$note"
   existing="$(gh pr list --repo "$repo" --head "$branch" --state open --json url --jq '.[0].url')"
-  if [[ -n "$existing" ]]; then printf '%s\n' "$existing"; return; fi
-  gh pr create --repo "$repo" --base "$base" --head "$branch" \
-    --title "chore: sync fork with upstream $upstream_branch" \
-    --body "Merges $behind commits from upstream/$upstream_branch ($(git rev-parse --short "upstream/$upstream_branch")). Opened by script/fork-sync.sh after a local \`bun run check\`.$note"
+  if [[ -n "$existing" ]]; then
+    gh pr edit "$existing" --title "$title" --body "$body" >/dev/null
+    printf '%s\n' "$existing"
+    return
+  fi
+  gh pr create --repo "$repo" --base "$base" --head "$branch" --title "$title" --body "$body"
 }
 
 disable_new_workflows() {
