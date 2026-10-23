@@ -14,7 +14,8 @@
     "repo-demo": "bun run script/repo-demo.ts",
     "isolation-demo": "bun run script/isolation-demo.ts",
     "test": "bun test --timeout 60000",
-    "typecheck": "tsc -b"
+    "typecheck": "bun check --no-script -b",
+    "typecheck:tsc": "tsc -b"
   },
   "dependencies": {
     "@opencode/ai": "workspace:*",
