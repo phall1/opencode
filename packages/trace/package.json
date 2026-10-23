@@ -10,7 +10,8 @@
   "scripts": {
     "test": "bun test --timeout 60000",
     "demo": "bun run script/demo.ts",
-    "typecheck": "tsc -b"
+    "typecheck": "bun check --no-script -b",
+    "typecheck:tsc": "tsc -b"
   },
   "dependencies": {
     "@opencode/core": "workspace:*",
