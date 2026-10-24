@@ -17,6 +17,7 @@ import type { SessionHttpResponse } from "@opencode/plugin/effect/session"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 import { App } from "../../app.js"
 import { Bus } from "../../bus.js"
+import { ConsoleAccess } from "../../console-access.js"
 import { Credential } from "../../credential.js"
 import { Integration } from "../../integration.js"
 import { IntegrationConnection } from "../../integration/connection.js"
@@ -24,14 +25,12 @@ import { ManagedPolicy } from "../../managed-policy.js"
 import { Model } from "../../model.js"
 import { Provider } from "../../provider.js"
 import { Variant } from "../../variant.js"
-import { Voice } from "../../voice.js"
 import { WebSearch } from "../../websearch.js"
 import { ConfigPolicy } from "@opencode/schema/config/policy"
 import { ConfigProvider } from "@opencode/schema/config/provider"
 import { Mcp } from "@opencode/schema/mcp"
 import { Money } from "@opencode/schema/money"
 
-const defaultServer = "https://opencode.ai/console"
 const clientID = "opencode-cli"
 const methodID = Integration.MethodID.make("device")
 // Drop statements whose action or effect is a value this version does not know, so a newer Console can
@@ -65,13 +64,6 @@ const RemoteResponse = Schema.Struct({
       Schema.Struct({ ...Mcp.RemoteConfig.fields, auth: Schema.Literal("console").pipe(Schema.optional) }),
     ),
   }).pipe(Schema.optional),
-  // Hosted voice models the Console starts for the caller's workspace, the inference base that creates them, and the
-  // workspace's display name, which older Consoles omit.
-  voice: Schema.Struct({
-    baseURL: Schema.String,
-    models: Schema.Array(Schema.String),
-    workspace: Schema.String.pipe(Schema.optional),
-  }).pipe(Schema.optional),
   // Organization policy compiled for the authenticated caller; omitted when there is none.
   // `experimental.policies` remains accepted alongside top-level `policies`.
   policies: RemotePolicies,
@@ -101,10 +93,6 @@ const SsoRequired = Schema.Struct({
   connectionId: Schema.String,
 })
 const InvalidGrant = Schema.Struct({ error: Schema.Literal("invalid_grant") })
-const LiveSession = Schema.fromJsonString(
-  Schema.Struct({ session: Schema.Struct({ id: Schema.String }), transport: Schema.Struct({ sdp: Schema.String }) }),
-)
-const InferenceError = Schema.fromJsonString(Schema.Struct({ error: Schema.Struct({ message: Schema.String }) }))
 // Console's 401 when the session behind the access token was revoked or expired.
 const Unauthorized = Schema.Struct({ _tag: Schema.Literal("Unauthorized") })
 const signedOutMessage = "Reconnect OpenCode Console to continue"
@@ -140,13 +128,13 @@ function oauth(http: HttpClient.HttpClient) {
           type: "string",
           format: "uri",
           hidden: true,
-          default: defaultServer,
+          default: ConsoleAccess.defaultServer,
         },
       ],
     },
     authorize: (answer) =>
       Effect.gen(function* () {
-        const server = yield* normalizeServer(answer.server ?? defaultServer)
+        const server = yield* normalizeServer(answer.server ?? ConsoleAccess.defaultServer)
         const device = yield* post(
           http,
           `${server}/auth/device/code`,
@@ -171,7 +159,7 @@ function oauth(http: HttpClient.HttpClient) {
       }),
     refresh: (credential) =>
       Effect.gen(function* () {
-        const response = yield* send(http, `${serverUrl(credential)}/auth/device/token`, {
+        const response = yield* send(http, `${ConsoleAccess.server(credential)}/auth/device/token`, {
           grant_type: "refresh_token",
           refresh_token: credential.refresh,
           client_id: clientID,
@@ -206,9 +194,7 @@ function oauth(http: HttpClient.HttpClient) {
   } satisfies IntegrationOAuthMethodRegistration
 }
 
-export const OpencodePlugin = define<
-  HttpClient.HttpClient | Bus.Service | ManagedPolicy.Service | Voice.Service | Scope.Scope
->({
+export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | ManagedPolicy.Service | Scope.Scope>({
   id: "opencode.provider.opencode",
   effect: Effect.fn(function* (ctx) {
     const disableFree = ["1", "true"].includes(process.env.OPENCODE_DISABLE_FREE_MODELS?.toLowerCase() ?? "")
@@ -218,7 +204,6 @@ export const OpencodePlugin = define<
     // and whether it evaluates the policies it is being sent.
     const http = HttpClient.mapRequest(client, HttpClientRequest.setHeader("User-Agent", App.useragent(ctx.app)))
     const managed = yield* ManagedPolicy.Service
-    const voice = yield* Voice.Service
     const scope = yield* Scope.Scope
     const loading = Semaphore.makeUnsafe(1)
     type ActiveConnection = Effect.Success<ReturnType<typeof ctx.integration.connection.active>>
@@ -257,7 +242,7 @@ export const OpencodePlugin = define<
               config,
               connection,
               organization: organizationName(credential),
-              mcp: config?.mcp && { servers: config.mcp.servers, headers: credentialHeaders(credential) },
+              mcp: config?.mcp && { servers: config.mcp.servers, headers: ConsoleAccess.headers(credential) },
             })),
           )
         }),
@@ -277,105 +262,12 @@ export const OpencodePlugin = define<
         ),
       )
     })
-    // The credential of the connection a snapshot was built from, while it is still the active one.
-    const resolveActive = Effect.fnUntraced(function* (connection: NonNullable<ActiveConnection>) {
-      const active = yield* ctx.integration.connection.active("opencode")
-      if (!active || IntegrationConnection.key(active) !== IntegrationConnection.key(connection))
-        return yield* Effect.fail(new Error("OpenCode Console connection changed"))
-      const credential = yield* ctx.integration.connection.resolve(active)
-      if (!credential || credential.type === "external")
-        return yield* Effect.fail(new Error("OpenCode Console is not connected"))
-      return credential
-    })
-
-    // Hosted GPT-Live: the server's apps start sessions on the Console's account, billed to the workspace, with
-    // the credential of the connection whose config offered it.
-    const consoleVoice = (
-      connection: NonNullable<ActiveConnection>,
-      offer: NonNullable<typeof RemoteResponse.Type.voice>,
-    ): Voice.Host => {
-      const send = (path: string, body: unknown) =>
-        Effect.gen(function* () {
-          const credential = yield* resolveActive(connection)
-          const response = yield* HttpClient.withScope(http).execute(
-            HttpClientRequest.post(`${offer.baseURL}${path}`).pipe(
-              HttpClientRequest.acceptJson,
-              HttpClientRequest.setHeaders(credentialHeaders(credential)),
-              HttpClientRequest.bodyJsonUnsafe(body),
-            ),
-          )
-          return { status: response.status, text: yield* response.text }
-        }).pipe(
-          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
-          Effect.scoped,
-          Effect.timeoutOrElse({
-            duration: Duration.seconds(20),
-            orElse: () => Effect.fail(new Error("OpenCode Console didn't answer in time")),
-          }),
-          Effect.mapError(
-            (cause) =>
-              new Voice.UnavailableError({
-                service: "opencode",
-                message: cause instanceof Error ? cause.message : String(cause),
-              }),
-          ),
-          Effect.flatMap((reply): Effect.Effect<string, Voice.Error> => {
-            if (reply.status >= 200 && reply.status < 300) return Effect.succeed(reply.text)
-            if (reply.status === 401)
-              return Effect.fail(new Voice.UnavailableError({ service: "opencode", message: `${signedOutMessage}.` }))
-            const message =
-              Option.getOrUndefined(Schema.decodeUnknownOption(InferenceError)(reply.text))?.error.message ??
-              `OpenCode Console refused the voice request (HTTP ${reply.status})`
-            return Effect.fail(
-              reply.status === 400 || reply.status === 404
-                ? new Voice.InvalidRequestError({ message })
-                : new Voice.UnavailableError({ service: "opencode", message }),
-            )
-          }),
-        )
-      return {
-        integration: "opencode",
-        models: offer.models,
-        workspace: offer.workspace,
-        session: (input) =>
-          send("/live/sessions", { session: { ...input.session, model: input.model }, transport: input.transport }).pipe(
-            Effect.flatMap((text) =>
-              Schema.decodeUnknownEffect(LiveSession)(text).pipe(
-                Effect.mapError(
-                  () =>
-                    new Voice.UnavailableError({
-                      service: "opencode",
-                      message: "OpenCode Console returned an invalid voice session",
-                    }),
-                ),
-              ),
-            ),
-            Effect.map((created) => ({
-              transport: { type: "webrtc" as const, sdp: created.transport.sdp },
-              id: created.session.id,
-            })),
-          ),
-        instruct: (input) =>
-          send(`/live/sessions/${encodeURIComponent(input.id)}/instructions`, {
-            instructions: input.instructions,
-          }).pipe(Effect.asVoid),
-      }
-    }
-
-    // Statements and hosted voice ride on the snapshot, so a credential switch, disconnect, or 404 replaces them too.
+    // Statements ride on the snapshot, so a credential switch, disconnect, or 404 replaces them too.
     const publish = (next: typeof snapshot) =>
-      Effect.all(
-        [
-          managed.set({
-            statements: [...(next.config?.experimental?.policies ?? []), ...(next.config?.policies ?? [])],
-            organization: next.organization,
-          }),
-          voice.host(
-            next.connection && next.config?.voice ? consoleVoice(next.connection, next.config.voice) : undefined,
-          ),
-        ],
-        { discard: true },
-      )
+      managed.set({
+        statements: [...(next.config?.experimental?.policies ?? []), ...(next.config?.policies ?? [])],
+        organization: next.organization,
+      })
 
     yield* ctx.integration.transform((editor) => {
       editor.update("opencode", (integration) => {
@@ -507,11 +399,22 @@ export const OpencodePlugin = define<
         name: "OpenCode Web Search",
         execute: (input) =>
           Effect.gen(function* () {
-            const credential = yield* resolveActive(connection)
+            const active = yield* ctx.integration.connection.active("opencode")
+            if (
+              !active ||
+              (connection.type === "credential"
+                ? active.type !== "credential" || active.id !== connection.id
+                : active.type !== "env" || active.name !== connection.name)
+            ) {
+              return yield* Effect.fail(new Error("OpenCode Console connection changed"))
+            }
+            const credential = yield* ctx.integration.connection.resolve(active)
+            if (!credential || credential.type === "external")
+              return yield* Effect.fail(new Error("OpenCode Console is not connected"))
             const metadata = credential.metadata
             const orgID = typeof metadata?.orgID === "string" ? metadata.orgID : undefined
             const token = credential.type === "oauth" ? credential.access : credential.key
-            const server = yield* normalizeServer(serverUrl(credential))
+            const server = yield* normalizeServer(ConsoleAccess.server(credential))
             const request = yield* HttpClientRequest.post(`${server}/api/websearch`).pipe(
               HttpClientRequest.acceptJson,
               HttpClientRequest.bearerToken(token),
@@ -631,9 +534,9 @@ function fetchConfig(http: HttpClient.HttpClient, value: Credential.Key | Creden
   // Scoped so responses whose body is never read (404, errors) are released here instead of by a GC-time abort.
   return HttpClient.withScope(http)
     .execute(
-      HttpClientRequest.get(`${serverUrl(value)}/api/v2/config`).pipe(
+      HttpClientRequest.get(`${ConsoleAccess.server(value)}/api/v2/config`).pipe(
         HttpClientRequest.acceptJson,
-        HttpClientRequest.setHeaders(credentialHeaders(value)),
+        HttpClientRequest.setHeaders(ConsoleAccess.headers(value)),
       ),
     )
     .pipe(
@@ -649,7 +552,7 @@ function fetchConfig(http: HttpClient.HttpClient, value: Credential.Key | Creden
             if (Option.isSome(body))
               return yield* new SsoRequiredError({
                 organization: organizationName(value),
-                url: yield* ssoUrl(serverUrl(value), body.value.connectionId),
+                url: yield* ssoUrl(ConsoleAccess.server(value), body.value.connectionId),
               })
           }
           return yield* HttpClientResponse.filterStatusOk(response).pipe(
@@ -688,21 +591,6 @@ function connectionStatus(cause: unknown): IntegrationConnection.Status | undefi
 
 function organizationName(credential: Credential.Value) {
   return typeof credential.metadata?.orgName === "string" ? credential.metadata.orgName : undefined
-}
-
-function credentialHeaders(value: Credential.Key | Credential.OAuth): Record<string, string> {
-  const orgID = value.metadata?.orgID
-  return {
-    authorization: `Bearer ${value.type === "oauth" ? value.access : value.key}`,
-    ...(typeof orgID === "string" ? { "x-org-id": orgID } : {}),
-  }
-}
-
-function serverUrl(value: Credential.Value) {
-  const server = typeof value.metadata?.server === "string" ? value.metadata.server : defaultServer
-  // Credentials saved before August 2026 store the retired console.opencode.ai host, which maps path-for-path onto
-  // the default server; rewriting it lets that host be shut down without forcing those users to reconnect.
-  return server.replace(/^https:\/\/console\.opencode\.ai(?=\/|$)/, defaultServer)
 }
 
 function withoutCredentials<Value>(body: Readonly<Record<string, Value>> | undefined) {
