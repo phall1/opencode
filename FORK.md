@@ -28,6 +28,10 @@ already pinned by the workspace. Replay code has an Oxc complexity ceiling of
   update the "Upstream sync needs attention" issue when the repository has
   issues enabled. With `FORK_SYNC_AGENT` set, an agent may attempt the repair,
   but its result is only proposed as a PR, never auto-merged.
+- The sync script uses the merged checkout's `packageManager` Bun pin. If the
+  scheduler's Bun differs, it selects the pinned runtime through mise for
+  installs and checks, including post-repair verification, without changing
+  the global Bun version. Without mise, put the pinned Bun on `PATH`.
 - Pull requests target **this fork**. An upstream PR requires separate explicit
   permission. Never treat maintaining a fork as permission to publish upstream.
 - Run experiments through an embedded, isolated host. Do not replace the managed

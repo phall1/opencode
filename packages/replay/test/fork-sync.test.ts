@@ -27,7 +27,9 @@ describe("fork-sync", () => {
     expect(result.exitCode).toBe(0)
     const calls = fx.calls().join("\n")
     expect(calls).toContain("pr create --repo phall1/opencode --base v2 --head upstream-sync")
-    expect(calls).toMatch(/pr merge https:\/\/example\.invalid\/pr\/1 --repo phall1\/opencode --merge --delete-branch --match-head-commit [0-9a-f]{40}/)
+    expect(calls).toMatch(
+      /pr merge https:\/\/example\.invalid\/pr\/1 --repo phall1\/opencode --merge --delete-branch --match-head-commit [0-9a-f]{40}/,
+    )
     expect(calls).toContain("workflow disable .github/workflows/models-snapshot.yml")
     expect(calls).not.toContain("workflow disable .github/workflows/replay-native.yml")
     expect(fx.git("ls-remote", "--heads", "origin", "refs/heads/upstream-sync")).toContain("refs/heads/upstream-sync")
@@ -78,13 +80,50 @@ describe("fork-sync", () => {
     fx.expectParked()
   })
 
+  test("uses the merged Bun pin for installs and checks when the scheduler runtime is older", () => {
+    const fx = fixture()
+    fx.upstreamCommit("package.json", JSON.stringify({ packageManager: "bun@1.4.5" }))
+    const result = fx.run({ FORK_SYNC_DRY_RUN: "1", FAKE_BUN_VERSION: "1.4.3" })
+    expect(result.stderr).toContain("dry run: verified")
+    expect(result.exitCode).toBe(0)
+    expect(fx.runtimeCalls()).toEqual(["exec bun@1.4.5 -- bun install", "exec bun@1.4.5 -- bun run check"])
+    fx.expectParked()
+  })
+
+  test("selects pinned Bun while resolving a lockfile conflict", () => {
+    const fx = fixture()
+    fx.forkCommit("bun.lock", "fork lock")
+    fx.upstreamCommit("bun.lock", "upstream lock")
+    const result = fx.run({ FORK_SYNC_DRY_RUN: "1", FAKE_BUN_VERSION: "1.4.3" })
+    expect(result.stderr).toContain("dry run: verified")
+    expect(result.exitCode).toBe(0)
+    expect(fx.runtimeCalls()).toEqual([
+      "exec bun@1.4.4 -- bun install",
+      "exec bun@1.4.4 -- bun install",
+      "exec bun@1.4.4 -- bun run check",
+    ])
+    fx.expectParked()
+  })
+
+  test("does not publish when the pinned runtime is unavailable", () => {
+    const fx = fixture()
+    fx.upstreamCommit("upstream.txt", "work")
+    const result = fx.run({ FAKE_BUN_VERSION: "1.4.3", FAKE_MISE_FAIL: "1" })
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain("pinned runtime unavailable")
+    expect(fx.calls().join("\n")).not.toContain("pr create")
+    fx.expectParked()
+  })
+
   test("files the tracking issue on a real conflict and leaves the worktree clean", () => {
     const fx = fixture()
     fx.forkCommit("shared.txt", "fork change")
     fx.upstreamCommit("shared.txt", "upstream change")
     const result = fx.run()
     expect(result.exitCode).toBe(2)
-    expect(fx.calls().join("\n")).toMatch(/issue create --repo phall1\/opencode --title Upstream sync needs attention --body .*conflicts: shared\.txt/)
+    expect(fx.calls().join("\n")).toMatch(
+      /issue create --repo phall1\/opencode --title Upstream sync needs attention --body .*conflicts: shared\.txt/,
+    )
     expect(fx.calls().join("\n")).not.toContain("pr merge")
     fx.expectParked()
   })
@@ -106,11 +145,16 @@ describe("fork-sync", () => {
     const agent = path.join(fx.root, "agent")
     writeFileSync(agent, "#!/bin/sh\necho fixed > fixed\ngit add fixed\ngit commit -qm 'fix: repair upstream sync'\n")
     chmodSync(agent, 0o755)
-    const result = fx.run({ FAKE_CHECK_NEEDS: "fixed", FORK_SYNC_AGENT: agent })
+    const result = fx.run({ FAKE_CHECK_NEEDS: "fixed", FORK_SYNC_AGENT: agent, FAKE_BUN_VERSION: "1.4.3" })
     expect(result.exitCode).toBe(3)
     const calls = fx.calls().join("\n")
     expect(calls).toContain("never auto-merged")
     expect(calls).not.toContain("pr merge")
+    expect(fx.runtimeCalls()).toEqual([
+      "exec bun@1.4.4 -- bun install",
+      "exec bun@1.4.4 -- bun run check",
+      "exec bun@1.4.4 -- bun run check",
+    ])
     fx.expectParked()
   })
 
@@ -133,7 +177,30 @@ function fixture() {
   mkdirSync(bin)
   writeFileSync(log, "")
   const prs = path.join(root, "prs")
-  fake(bin, "bun", `[ "$1" = run ] && [ -n "$FAKE_CHECK_NEEDS" ] && [ ! -f "$FAKE_CHECK_NEEDS" ] && { echo "check failed" >&2; exit 1; }\nexit 0`)
+  const runtime = path.join(root, "runtime-calls")
+  writeFileSync(runtime, "")
+  fake(
+    bin,
+    "bun",
+    [
+      String.raw`[ "$1" = -p ] && { sed -n 's/.*"packageManager":"bun@\([^"]*\)".*/\1/p' package.json; exit 0; }`,
+      `[ "$1" = --version ] && { echo "$FAKE_BUN_VERSION"; exit 0; }`,
+      String.raw`[ "$FAKE_BUN_VERSION" = "$(sed -n 's/.*"packageManager":"bun@\([^"]*\)".*/\1/p' package.json)" ] || { echo "wrong Bun runtime" >&2; exit 1; }`,
+      `[ "$1" = run ] && [ -n "$FAKE_CHECK_NEEDS" ] && [ ! -f "$FAKE_CHECK_NEEDS" ] && { echo "check failed" >&2; exit 1; }`,
+      "exit 0",
+    ].join("\n"),
+  )
+  fake(
+    bin,
+    "mise",
+    [
+      `printf '%s\\n' "$*" >> "${runtime}"`,
+      `[ "$FAKE_MISE_FAIL" = 1 ] && { echo "pinned runtime unavailable" >&2; exit 1; }`,
+      `export FAKE_BUN_VERSION="\${2#bun@}"`,
+      "shift 3",
+      'exec "$@"',
+    ].join("\n"),
+  )
   // Tracks created PRs so a second run exercises the reuse path for real.
   fake(
     bin,
@@ -168,6 +235,8 @@ function fixture() {
     FORK_SYNC_DRY_RUN: "0",
     FAKE_HAS_ISSUES: "true",
     FAKE_CHECK_NEEDS: "",
+    FAKE_BUN_VERSION: "1.4.4",
+    FAKE_MISE_FAIL: "0",
     PATH: `${bin}:${process.env.PATH}`,
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
@@ -183,6 +252,7 @@ function fixture() {
   }
   git(root, "init", "-q", "-b", "dev", upstream)
   writeFileSync(path.join(upstream, "shared.txt"), "base\n")
+  writeFileSync(path.join(upstream, "package.json"), JSON.stringify({ packageManager: "bun@1.4.4" }))
   git(upstream, "add", ".")
   git(upstream, "commit", "-qm", "base")
   git(root, "clone", "-q", "--bare", upstream, path.join(root, "origin.git"))
@@ -211,6 +281,7 @@ function fixture() {
       return { exitCode: result.exitCode, stderr: result.stderr.toString() }
     },
     calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean),
+    runtimeCalls: () => readFileSync(runtime, "utf8").split("\n").filter(Boolean),
     expectParked: () => {
       expect(git(work, "status", "--porcelain")).toBe("")
       expect(git(work, "branch", "--show-current").trim()).toBe("")

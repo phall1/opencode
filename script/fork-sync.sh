@@ -30,6 +30,22 @@ allowed_workflows=(.github/workflows/replay-native.yml)
 log() { printf '[fork-sync] %s\n' "$*" >&2; }
 dry() { [[ "${FORK_SYNC_DRY_RUN:-0}" == 1 ]]; }
 
+# A scheduler's PATH can lag the checkout's packageManager pin. Keep installs,
+# checks and post-repair verification on that runtime without changing globals.
+bun() {
+  local version
+  version="$(command bun -p "require('./package.json').packageManager.slice(4)")" || return 1
+  if [[ "$(command bun --version)" == "$version" ]]; then
+    command bun "$@"
+    return
+  fi
+  if ! command -v mise >/dev/null 2>&1; then
+    log "Bun $version is required; put it on PATH or install mise to select it"
+    return 1
+  fi
+  mise exec "bun@$version" -- bun "$@"
+}
+
 main() {
   cd "$(git rev-parse --show-toplevel)"
   [[ -z "$(git status --porcelain)" ]] || { log 'worktree is dirty; refusing to run'; exit 2; }
