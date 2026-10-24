@@ -115,6 +115,19 @@ describe("fork-sync", () => {
     fx.expectParked()
   })
 
+  test("publishes with pinned Bun available to the pre-push hook", () => {
+    const fx = fixture()
+    fx.upstreamCommit("upstream.txt", "work")
+    const hook = path.join(fx.work, ".git/hooks/pre-push")
+    writeFileSync(hook, '#!/bin/sh\n[ "$(bun --version)" = "1.4.4" ]\n')
+    chmodSync(hook, 0o755)
+    const result = fx.run({ FAKE_BUN_VERSION: "1.4.3", FAKE_HAS_ISSUES: "false" })
+    expect(result.exitCode).toBe(0)
+    expect(fx.calls().join("\n")).toContain("pr create")
+    expect(fx.runtimeCalls()).toContainEqual(expect.stringContaining("exec bun@1.4.4 -- git push"))
+    fx.expectParked()
+  })
+
   test("files the tracking issue on a real conflict and leaves the worktree clean", () => {
     const fx = fixture()
     fx.forkCommit("shared.txt", "fork change")
@@ -154,6 +167,7 @@ describe("fork-sync", () => {
       "exec bun@1.4.4 -- bun install",
       "exec bun@1.4.4 -- bun run check",
       "exec bun@1.4.4 -- bun run check",
+      expect.stringContaining("exec bun@1.4.4 -- git push"),
     ])
     fx.expectParked()
   })
