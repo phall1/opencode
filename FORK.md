@@ -65,6 +65,13 @@ Core's optional native PTY setup may be needed for interactive TUI development;
 the finite replay demo does not require it. Tests run from their package
 directories, never from the repository root.
 
+Use the Bun version pinned in `package.json`'s `packageManager` field. The local
+`mise.toml` enables reading that pin instead of inheriting a stale global Bun
+version, including in the scheduled fork-sync worktree when mise's shims are on
+`PATH`. When setting up a new checkout with mise, run `mise trust` and
+`mise install`; this does not change the installed OpenCode binary or its
+managed service.
+
 ## The fundamentals
 
 The composition and acceptance contract is [specs/replay-native.md](specs/replay-native.md).
