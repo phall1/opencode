@@ -30,6 +30,22 @@ allowed_workflows=(.github/workflows/replay-native.yml)
 log() { printf '[fork-sync] %s\n' "$*" >&2; }
 dry() { [[ "${FORK_SYNC_DRY_RUN:-0}" == 1 ]]; }
 
+# A scheduler's PATH can lag the checkout's packageManager pin. Keep installs,
+# checks and post-repair verification on that runtime without changing globals.
+with_bun() {
+  local version
+  version="$(command bun -p "require('./package.json').packageManager.slice(4)")" || return 1
+  if [[ "$(command bun --version)" == "$version" ]]; then
+    "$@"
+    return
+  fi
+  if ! command -v mise >/dev/null 2>&1; then
+    log "Bun $version is required; put it on PATH or install mise to select it"
+    return 1
+  fi
+  mise exec "bun@$version" -- "$@"
+}
+
 main() {
   cd "$(git rev-parse --show-toplevel)"
   [[ -z "$(git status --porcelain)" ]] || { log 'worktree is dirty; refusing to run'; exit 2; }
@@ -76,7 +92,7 @@ main() {
 push_branch() {
   local branch="$1" remote_sha
   remote_sha="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
-  git push --quiet --force-with-lease="refs/heads/$branch:$remote_sha" origin "$branch"
+  with_bun git push --quiet --force-with-lease="refs/heads/$branch:$remote_sha" origin "$branch"
 }
 
 # Earlier runs opened one PR per upstream sha; retire those so a single open PR
@@ -125,11 +141,11 @@ merge_upstream() {
     conflicts="$(git diff --name-only --diff-filter=U)"
     [[ "$conflicts" == bun.lock ]] || { FAILURE="conflicts: $(paste -sd, - <<< "$conflicts")"; return 1; }
     git checkout --quiet --theirs bun.lock
-    bun install >/dev/null
+    with_bun bun install >/dev/null
     git add bun.lock
     git commit --quiet --no-edit
   fi
-  bun install >/dev/null
+  with_bun bun install >/dev/null
   if [[ -n "$(git status --porcelain bun.lock)" ]]; then
     git add bun.lock
     git commit --quiet -m 'chore: regenerate lockfile after upstream sync'
@@ -138,7 +154,7 @@ merge_upstream() {
 
 verify() {
   local output
-  if output="$(bun run check 2>&1)"; then return 0; fi
+  if output="$(with_bun bun run check 2>&1)"; then return 0; fi
   FAILURE="bun run check failed: $(tail -n 20 <<< "$output")"
   return 1
 }

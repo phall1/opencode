@@ -98,6 +98,11 @@ function resourceServer(
     listChanged?: boolean
     emptyElicitation?: boolean
     urlElicitation?: boolean
+    /**
+     * List a tool whose input schema is not an object, and one whose `required` is a string, which
+     * only the 2026-07-28 schema accepts, ahead of the valid tools.
+     */
+    malformedTool?: boolean
     /** Legacy servers give up on the URL elicitation after this many milliseconds. */
     elicitationTimeout?: number
     respond?: (request: Request) => Response | undefined | Promise<Response | undefined>
@@ -147,11 +152,23 @@ function resourceServer(
         protocol.setRequestHandler("tools/list", () => {
           state.toolLists += 1
           return Promise.resolve({
-            tools: input.emptyElicitation
-              ? [{ name: "empty-elicitation", inputSchema: { type: "object" as const, properties: {} } }]
-              : input.urlElicitation
-                ? [{ name: "url-elicitation", inputSchema: { type: "object" as const, properties: {} } }]
-                : [{ name: "echo", inputSchema: { type: "object" as const, properties: {} } }],
+            tools: [
+              // Servers send raw JSON; the cast lets the fixture send a tool the schema rejects.
+              ...(input.malformedTool
+                ? [
+                    { name: "malformed", inputSchema: { type: "string" } } as unknown as McpClient.Tool,
+                    {
+                      name: "modern-only",
+                      inputSchema: { type: "object", required: "text" },
+                    } as unknown as McpClient.Tool,
+                  ]
+                : []),
+              ...(input.emptyElicitation
+                ? [{ name: "empty-elicitation", inputSchema: { type: "object" as const, properties: {} } }]
+                : input.urlElicitation
+                  ? [{ name: "url-elicitation", inputSchema: { type: "object" as const, properties: {} } }]
+                  : [{ name: "echo", inputSchema: { type: "object" as const, properties: {} } }]),
+            ],
           })
         })
         if (input.emptyElicitation) {
@@ -1182,6 +1199,28 @@ describe.each([
       ),
     )
   })
+
+  test("skips tools the SDK rejects and keeps the rest of the server's tools", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* resourceServer({ modern: era === "modern", resources: false, malformedTool: true })
+          const connection = yield* connect(
+            "malformed",
+            new ConfigMCP.Remote({ type: "remote", url: server.url, oauth: false, protocol }),
+            import.meta.dir,
+          )
+
+          // Only tools the SDK itself would reject for the negotiated era are skipped.
+          expect((yield* connection.tools()).map((tool) => tool.name)).toEqual(
+            era === "modern" ? ["modern-only", "echo"] : ["echo"],
+          )
+          yield* connection.callTool({ name: "echo", args: { text: "hi" } })
+          expect(server.state.toolCalls.at(-1)).toMatchObject({ name: "echo", arguments: { text: "hi" } })
+        }),
+      ),
+    )
+  })
 })
 
 test("lists, reads, and reports MCP resource changes", async () => {
@@ -2098,6 +2137,53 @@ shutdownIt.effect("discards in-flight and queued MCP notifications after its lay
     expect((yield* service.servers()).map((server) => server.name)).toEqual([Mcp.ServerName.make("fixture")])
   }),
 )
+
+describe.each(["connect", "disconnect"] as const)("%s during initial MCP startup", (operation) => {
+  shutdownIt.live("is not undone by the queued startup", () =>
+    Effect.gen(function* () {
+      const bus = yield* Bus.Service
+      const server = yield* resourceServer()
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const root = yield* Scope.make()
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(release, undefined).pipe(Effect.andThen(State.shutdown(Scope.close(root, Exit.void)))),
+      )
+      const service = Context.get(yield* Layer.buildWithScope(Mcp.layer(), root), Mcp.Service)
+      // Pausing the disabled server's status event holds initial reconciliation after every entry exists
+      // but before the enabled server's startup is scheduled.
+      yield* Effect.acquireRelease(
+        bus.listen((event) =>
+          Effect.gen(function* () {
+            if (event.type !== McpEvent.StatusChanged.type) return
+            if (Schema.decodeUnknownSync(McpEvent.StatusChanged.data)(event.data).server !== "gate") return
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+          }),
+        ),
+        (unsubscribe) => unsubscribe,
+      )
+      const reconciling = yield* service
+        .transform((editor) => {
+          editor.set("gate", { type: "local", command: ["unused"], disabled: true })
+          editor.set("resources", { type: "remote", url: server.url, oauth: false })
+        })
+        .pipe(Scope.provide(root), Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(entered)
+
+      yield* service[operation]("resources")
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(reconciling)
+      // The queued startup already holds or awaits the server lock, so this waits for it to finish.
+      yield* service.disconnect("resources")
+
+      expect(server.state.initializations).toBe(operation === "connect" ? 1 : 0)
+      expect((yield* service.servers()).find((item) => item.name === "resources")?.status).toEqual({
+        status: "disabled",
+      })
+    }),
+  )
+})
 
 test("serializes concurrent MCP lifecycle operations", async () => {
   await Effect.runPromise(

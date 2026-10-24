@@ -28,6 +28,10 @@ already pinned by the workspace. Replay code has an Oxc complexity ceiling of
   update the "Upstream sync needs attention" issue when the repository has
   issues enabled. With `FORK_SYNC_AGENT` set, an agent may attempt the repair,
   but its result is only proposed as a PR, never auto-merged.
+- The sync script uses the merged checkout's `packageManager` Bun pin. If the
+  scheduler's Bun differs, it selects the pinned runtime through mise for
+  installs, checks and push hooks, including post-repair verification, without changing
+  the global Bun version. Without mise, put the pinned Bun on `PATH`.
 - Pull requests target **this fork**. An upstream PR requires separate explicit
   permission. Never treat maintaining a fork as permission to publish upstream.
 - Run experiments through an embedded, isolated host. Do not replace the managed
@@ -60,6 +64,13 @@ bun run replay measure /path/to/new-child.json child-one-v1
 Core's optional native PTY setup may be needed for interactive TUI development;
 the finite replay demo does not require it. Tests run from their package
 directories, never from the repository root.
+
+Use the Bun version pinned in `package.json`'s `packageManager` field. The local
+`mise.toml` enables reading that pin instead of inheriting a stale global Bun
+version, including in the scheduled fork-sync worktree when mise's shims are on
+`PATH`. When setting up a new checkout with mise, run `mise trust` and
+`mise install`; this does not change the installed OpenCode binary or its
+managed service.
 
 ## The fundamentals
 
