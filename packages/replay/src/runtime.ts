@@ -1,4 +1,4 @@
-import { Auth, LanguageModel } from "@opencode/ai"
+import { Auth, LanguageModel } from "@opencode/ai/effect"
 import { OpenAIChat } from "@opencode/ai/protocols"
 import { Config } from "@opencode/core/config"
 import { ConfigPluginSource } from "@opencode/core/config/plugin/source"
