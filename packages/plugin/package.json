@@ -8,7 +8,8 @@
     "test": "bun test --only-failures",
     "typecheck": "bun check --no-script",
     "typecheck:tsc": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "pack": "bun run script/pack.ts"
   },
   "exports": {
     ".": "./src/promise/index.ts",
@@ -68,5 +69,10 @@
     "solid-js": "catalog:",
     "typescript": "catalog:",
     "@typescript/native": "catalog:"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anomalyco/opencode.git",
+    "directory": "packages/plugin"
   }
 }
