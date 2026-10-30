@@ -31,7 +31,7 @@ export const Manifest = Schema.Struct({
   profile: Schema.Literal("serial-text-files-v1"),
   identity: Schema.Struct({
     bun: Schema.String,
-    effect: Schema.Literal("4.0.1"),
+    effect: Schema.Literal("4.0.6"),
     sources: Schema.Record(Schema.String, Hash),
     model: Schema.Literal("fixture/repair-v1"),
     instructions: Schema.String,

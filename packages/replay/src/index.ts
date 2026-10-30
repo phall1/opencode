@@ -97,7 +97,7 @@ function assemble(input: {
       prompt: input.prompt,
       identity: input.parent?.manifest.identity ?? {
         bun: Bun.version,
-        effect: "4.0.1",
+        effect: "4.0.6",
         sources: sourcePins(),
         model: "fixture/repair-v1",
         instructions: INSTRUCTIONS,
