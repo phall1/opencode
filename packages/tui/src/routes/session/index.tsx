@@ -3459,7 +3459,7 @@ function Edit(props: ToolProps) {
       <Match when={file()}>
         {(item) => (
           <BlockTool path={{ label: "← Edit", value: pathFormatter.format(path()) }} part={props.part}>
-            <box paddingLeft={1}>
+            <box paddingLeft={1} paddingRight={3}>
               <PatchDiff
                 diff={item().patch}
                 hunkFg={theme.diff.text.hunkHeader}
@@ -3549,7 +3549,7 @@ function ApplyPatch(props: ToolProps) {
                     </text>
                   }
                 >
-                  <box paddingLeft={1}>
+                  <box paddingLeft={1} paddingRight={3}>
                     <PatchDiff
                       diff={file.patch}
                       hunkFg={theme.diff.text.hunkHeader}
