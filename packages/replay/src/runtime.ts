@@ -99,7 +99,7 @@ export const sourcePins = () => {
     path.resolve(realpathSync(Bun.resolveSync("effect", import.meta.dir)), "../../package.json"),
     "utf8",
   )
-  Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ version: Schema.Literal("4.0.1") })))(resolved)
+  Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ version: Schema.Literal("4.0.6") })))(resolved)
   return {
     ...Object.fromEntries(SOURCES.map((file) => [file, hash(readFileSync(path.join(ROOT, file), "utf8"))])),
     "resolved/effect/package.json": hash(resolved),
