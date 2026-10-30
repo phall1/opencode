@@ -579,8 +579,19 @@ test("vertical tabs resize, scroll, show shortcut hints, and navigate", async ({
   await resize(-380, "260px")
 
   const scroll = sidebar.locator('[data-slot="vertical-tabs-scroll"]')
+
+  // The list feathers only the edges with more rows past them.
+  const feather = () =>
+    scroll.evaluate((element) => {
+      const style = getComputedStyle(element)
+
+      return [style.getPropertyValue("--vertical-tabs-fade-top"), style.getPropertyValue("--vertical-tabs-fade-bottom")]
+    })
+
+  await expect.poll(feather).toEqual(["0px", "16px"])
   await scroll.evaluate((element) => element.scrollTo(0, element.scrollHeight))
   await expect(tabB).toBeInViewport({ ratio: 1 })
+  await expect.poll(feather).toEqual(["16px", "0px"])
 
   await page.locator("html").evaluate((element) => element.setAttribute("dir", "rtl"))
   const home = sidebar.locator('[data-action="vertical-tabs-home"]')
@@ -1235,7 +1246,7 @@ test("⌘W closes the session tab again once the window loses focus after the si
   await expect(sessions.alphaTab).toHaveCount(0)
 })
 
-test("⌘W in the side panel closes its New tab, then the panel, and only then the session tab", async ({ page }) => {
+test("⌘W in the side panel closes its last New tab with the panel, and only then the session tab", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const alpha = { id: "ses_side_new_alpha", title: "Side new alpha" }
   const beta = { id: "ses_side_new_beta", title: "Side new beta" }
@@ -1254,14 +1265,14 @@ test("⌘W in the side panel closes its New tab, then the panel, and only then t
   // A launcher row in the New tab view holds focus as ⌘W removes it.
   await panel.getByRole("button", { name: /^Open file/ }).focus()
 
+  // The New tab was the panel's last tab, so closing it closes the panel too, and focus goes back.
   await page.keyboard.press("ControlOrMeta+w")
   await expect(newTab).toHaveCount(0)
-  await expect(toggle).toHaveAttribute("aria-expanded", "true")
-
-  // Nothing is left to close in the panel, so ⌘W closes the panel rather than the session, and focus goes back.
-  await page.keyboard.press("ControlOrMeta+w")
   await expect(toggle).toHaveAttribute("aria-expanded", "false")
   await expect(composer).toBeFocused()
+
+  // One press too many closes nothing rather than the session.
+  await page.keyboard.press("ControlOrMeta+w")
   await expect(alphaTab).toHaveCount(1)
   await expectPath(page, sessionHref(alpha.id))
 
