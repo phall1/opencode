@@ -26,12 +26,21 @@ already pinned by the workspace. Replay code has an Oxc complexity ceiling of
   by the earlier one-branch-per-attempt scheme, instead of opening another.
   Other conflicts or failures are logged (the dotfiles wrapper notifies) and
   update the "Upstream sync needs attention" issue when the repository has
-  issues enabled. With `FORK_SYNC_AGENT` set, an agent may attempt the repair,
-  but its result is only proposed as a PR, never auto-merged.
+  issues enabled. With `FORK_SYNC_AGENT` set, an agent repairs local conflicts or
+  failing checks, then the parent job publishes and lands the repair through the
+  same CI gate as clean merges. It also attempts one repair of failing CI with
+  the failed run's logs, re-verifies locally, updates the PR, and waits for fresh
+  CI. Missing, skipped, failed, or wrong-head checks never authorize merging;
+  exhausted repairs escalate rather than looping or bypassing verification.
 - The sync script uses the merged checkout's `packageManager` Bun pin. If the
   scheduler's Bun differs, it selects the pinned runtime through mise for
   installs, checks and push hooks, including post-repair verification, without changing
   the global Bun version. Without mise, put the pinned Bun on `PATH`.
+- The scheduled dotfiles wrapper serializes attempts and reuses one OpenCode
+  repair session, persisted in its local `repair-session` state file. Normal
+  native automatic compaction keeps that thread bounded; no new session is
+  created for each conflict or CI retry. `opencode-fork-sync status` prints the
+  command to reopen it. Explicit `FORK_SYNC_AGENT` overrides remain supported.
 - Pull requests target **this fork**. An upstream PR requires separate explicit
   permission. Never treat maintaining a fork as permission to publish upstream.
 - Run experiments through an embedded, isolated host. Do not replace the managed

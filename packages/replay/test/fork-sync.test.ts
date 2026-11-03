@@ -152,23 +152,92 @@ describe("fork-sync", () => {
     fx.expectParked()
   })
 
-  test("an agent repair is proposed for review and never auto-merged", () => {
+  test("lands an agent repair after local verification and fresh CI", () => {
     const fx = fixture()
     fx.upstreamCommit("upstream.txt", "breaks checks")
     const agent = path.join(fx.root, "agent")
     writeFileSync(agent, "#!/bin/sh\necho fixed > fixed\ngit add fixed\ngit commit -qm 'fix: repair upstream sync'\n")
     chmodSync(agent, 0o755)
     const result = fx.run({ FAKE_CHECK_NEEDS: "fixed", FORK_SYNC_AGENT: agent, FAKE_BUN_VERSION: "1.4.3" })
-    expect(result.exitCode).toBe(3)
+    expect(result.exitCode).toBe(0)
     const calls = fx.calls().join("\n")
-    expect(calls).toContain("never auto-merged")
-    expect(calls).not.toContain("pr merge")
+    expect(calls).toContain("successful replay-native CI on the repaired head")
+    expect(calls.indexOf("--watch")).toBeLessThan(calls.indexOf("pr merge"))
+    expect(calls).toContain("pr merge")
     expect(fx.runtimeCalls()).toEqual([
       "exec bun@1.4.4 -- bun install",
       "exec bun@1.4.4 -- bun run check",
       "exec bun@1.4.4 -- bun run check",
       expect.stringContaining("exec bun@1.4.4 -- git push"),
     ])
+    fx.expectParked()
+  })
+
+  test("lands a repaired merge conflict, preserving both histories", () => {
+    const fx = fixture()
+    fx.forkCommit("shared.txt", "fork change")
+    fx.upstreamCommit("shared.txt", "upstream change")
+    const agent = path.join(fx.root, "agent")
+    writeFileSync(
+      agent,
+      "#!/bin/sh\nprintf 'fork change\\nupstream change\\n' > shared.txt\ngit add shared.txt\ngit commit -qm 'fix: preserve both behaviors'\n",
+    )
+    chmodSync(agent, 0o755)
+    expect(fx.run({ FORK_SYNC_AGENT: agent }).exitCode).toBe(0)
+    expect(fx.calls().join("\n")).toContain("pr merge")
+    expect(fx.git("show", "origin/upstream-sync:shared.txt")).toBe("fork change\nupstream change\n")
+    fx.expectParked()
+  })
+
+  test("repairs failing CI using its logs, republishes, and waits again before merging", () => {
+    const fx = fixture()
+    fx.upstreamCommit("upstream.txt", "work")
+    const agent = path.join(fx.root, "agent")
+    writeFileSync(
+      agent,
+      `#!/bin/sh\nprintf '%s' "$1" > '${fx.root}/prompt'\necho fixed > fixed\ngit add fixed\ngit commit -qm 'fix: repair CI'\n`,
+    )
+    chmodSync(agent, 0o755)
+    const result = fx.run({ FAKE_CI_NEEDS: "fixed", FORK_SYNC_AGENT: agent, FAKE_ISSUE_NUMBER: "1" })
+    expect(result.stderr).toContain("asking agent to repair")
+    expect(result.exitCode).toBe(0)
+    const calls = fx.calls()
+    expect(calls.filter((call) => call.includes("--watch"))).toHaveLength(2)
+    expect(calls.filter((call) => call.startsWith("pr create"))).toHaveLength(1)
+    expect(calls.filter((call) => call.startsWith("pr edit"))).toHaveLength(1)
+    expect(calls.join("\n")).toContain("run view 123 --repo phall1/opencode --log-failed")
+    expect(readFileSync(path.join(fx.root, "prompt"), "utf8")).toContain("synthetic CI diagnostic")
+    expect(calls.at(-1)).toContain("issue close")
+    expect(calls.join("\n")).toContain("pr merge")
+    fx.expectParked()
+  })
+
+  test("escalates a failed CI repair without merging or retrying forever", () => {
+    const fx = fixture()
+    fx.upstreamCommit("upstream.txt", "work")
+    const agent = path.join(fx.root, "agent")
+    writeFileSync(agent, `#!/bin/sh\necho attempt >> '${fx.root}/attempts'\n`)
+    chmodSync(agent, 0o755)
+    expect(fx.run({ FAKE_CI_NEEDS: "fixed", FORK_SYNC_AGENT: agent }).exitCode).toBe(2)
+    expect(readFileSync(path.join(fx.root, "attempts"), "utf8")).toBe("attempt\n")
+    expect(fx.calls().join("\n")).not.toContain("pr merge")
+    expect(fx.calls().filter((call) => call.includes("--watch"))).toHaveLength(2)
+    fx.expectParked()
+  })
+
+  test.each(["MISSING", "SKIPPING", "FAILURE"])("does not merge when replay-native is %s", (state) => {
+    const fx = fixture()
+    fx.upstreamCommit("upstream.txt", "work")
+    expect(fx.run({ FAKE_REPLAY_STATE: state }).exitCode).toBe(2)
+    expect(fx.calls().join("\n")).not.toContain("pr merge")
+    fx.expectParked()
+  })
+
+  test("does not merge when the PR head changes during CI", () => {
+    const fx = fixture()
+    fx.upstreamCommit("upstream.txt", "work")
+    expect(fx.run({ FAKE_HEAD_CHANGE: "1" }).exitCode).toBe(2)
+    expect(fx.calls().join("\n")).not.toContain("pr merge")
     fx.expectParked()
   })
 
@@ -230,13 +299,25 @@ function fixture() {
       `      *"--head "*) if [ -s "${prs}" ]; then echo "https://example.invalid/pr/$(wc -l < "${prs}" | tr -d ' ')"; fi ;;`,
       `      *) printf '%s' "\${FAKE_STALE_PRS:-}" ;;`,
       `    esac ;;`,
-      `  "pr view") git rev-parse HEAD ;;`,
-      `  "pr checks") echo replay ;;`,
+      `  "pr view") if [ "$FAKE_HEAD_CHANGE" = 1 ] && [ -f '${root}/watched' ]; then echo wrong-head; else git rev-parse HEAD; fi ;;`,
+      `  "pr checks")`,
+      `    state="$FAKE_REPLAY_STATE"`,
+      `    [ -n "$FAKE_CI_NEEDS" ] && [ ! -f "$FAKE_CI_NEEDS" ] && state=FAILURE`,
+      `    case "$*" in`,
+      `      *"--watch"*) touch '${root}/watched'; [ "$state" != FAILURE ] || exit 1 ;;`,
+      `      *"--json"*) echo "$state" ;;`,
+      `      *) echo "replay $state" ;;`,
+      `    esac ;;`,
+      `  "run list") echo 123 ;;`,
+      `  "run view") echo 'synthetic CI diagnostic' ;;`,
+      `  "issue list") echo "$FAKE_ISSUE_NUMBER" ;;`,
       `  "workflow list") printf '%s\\n' .github/workflows/replay-native.yml .github/workflows/models-snapshot.yml ;;`,
       `  "api repos/phall1/opencode") echo "\${FAKE_HAS_ISSUES:-true}" ;;`,
       `esac`,
     ].join("\n"),
   )
+  // Registration polling is deterministic; never spend real seconds in tests.
+  fake(bin, "sleep", "exit 0")
   // CI runners have no git identity; the script's merge commits need one.
   const env = {
     ...process.env,
@@ -251,6 +332,10 @@ function fixture() {
     FAKE_CHECK_NEEDS: "",
     FAKE_BUN_VERSION: "1.4.4",
     FAKE_MISE_FAIL: "0",
+    FAKE_REPLAY_STATE: "SUCCESS",
+    FAKE_CI_NEEDS: "",
+    FAKE_HEAD_CHANGE: "0",
+    FAKE_ISSUE_NUMBER: "",
     PATH: `${bin}:${process.env.PATH}`,
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
