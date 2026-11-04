@@ -1649,7 +1649,7 @@ export function Session(props: {
                     ref={bind}
                     muted={props.promptMuted}
                     onSubmit={() => {
-                      toBottom()
+                      if (config.session?.submit_scroll !== "keep") toBottom()
                     }}
                     onEmptySubmit={async () => {
                       const next = queuedPrompts()[0]
