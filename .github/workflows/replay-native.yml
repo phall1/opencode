@@ -63,3 +63,85 @@ jobs:
         run: bun run trace:demo
       - name: Verifier containment acceptance
         run: bun run replay:isolation
+
+  fork-build:
+    needs: replay
+    if: github.repository == 'phall1/opencode' && github.ref == 'refs/heads/v2' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [darwin-arm64, linux-arm64, linux-x64]
+    env:
+      OPENCODE_CHANNEL: fork
+      OPENCODE_VERSION: 0.0.0-fork-${{ github.run_number }}.${{ github.run_attempt }}
+      OPENCODE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Install pinned cross-target dependencies without lifecycle scripts
+        run: bun install --frozen-lockfile --ignore-scripts --os='*' --cpu='*' --libc='*'
+      - name: Build native fork channel, including web assets
+        run: bun run --cwd packages/cli build --skip-install
+      - name: Smoke test the native Linux artifact
+        if: matrix.target == 'linux-x64'
+        run: bash script/fork-smoke.sh "$GITHUB_WORKSPACE/packages/cli/dist/cli-$OPENCODE_TARGET/bin/opencode"
+      - name: Package immutable source-identified artifact
+        run: bash script/fork-package.sh "$OPENCODE_TARGET" "packages/cli/dist/cli-$OPENCODE_TARGET/bin/opencode" fork-dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fork-${{ matrix.target }}
+          path: fork-dist
+          if-no-files-found: error
+          retention-days: 7
+
+  fork-publish:
+    needs: fork-build
+    if: github.repository == 'phall1/opencode' && github.ref == 'refs/heads/v2' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # No checkout or execution of candidate binaries in the write-token job.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: fork-*
+          merge-multiple: true
+          path: fork-dist
+      - name: Validate manifests and publish the verified fork channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: phall1/opencode
+          BUILD_VERSION: 0.0.0-fork-${{ github.run_number }}.${{ github.run_attempt }}
+        working-directory: fork-dist
+        run: |
+          set -euo pipefail
+          jq -se --arg commit "$GITHUB_SHA" --arg buildVersion "$BUILD_VERSION" '
+            length == 3 and all(.[]; .version == 1 and .repository == "phall1/opencode" and
+              .commit == $commit and .channel == "fork" and .buildVersion == $buildVersion) and
+            ([.[].targets[]] | sort) == ["darwin-arm64","linux-arm64","linux-x64"]
+          ' manifest-*.json >/dev/null
+          jq -s '.[0] + {targets: ([.[].targets[]] | sort)}' manifest-*.json > manifest.json
+          cat SHA256SUMS-* > SHA256SUMS
+          sha256sum --check --strict SHA256SUMS
+          tag="fork-$GITHUB_SHA"
+          if [[ "$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || true)" == false ]]; then
+            echo "Immutable fork release already exists: $tag"
+            exit 0
+          fi
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --draft --prerelease \
+              --title "OpenCode fork $GITHUB_SHA" \
+              --notes "Verified fork channel. Source: $GITHUB_SHA. Built only after replay-native acceptance passed. Install with opencode-fork-update; upstream installers must not update this channel."
+          fi
+          # Only an unpublished draft can be repaired; published releases stay immutable.
+          gh release upload "$tag" --clobber manifest.json SHA256SUMS opencode-fork-*.tar.gz
+          gh release edit "$tag" --draft=false --latest=false

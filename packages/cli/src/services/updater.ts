@@ -57,6 +57,7 @@ const installNames: Record<Method, string> = {
 }
 
 const wingetPackage = "Anomaly.OpenCode"
+const forkUpdateMessage = "This fork is updated from verified phall1/opencode builds. Run opencode-fork-update instead."
 const wingetArgs = [
   "--id",
   wingetPackage,
@@ -273,6 +274,7 @@ const make = Effect.gen(function* () {
   }
 
   const release = Effect.fnUntraced(function* (method?: Method) {
+    if (channel === "fork") return yield* Effect.fail(new Error(forkUpdateMessage))
     const distribution = method === "brew" ? "homebrew" : "npm"
     // Homebrew Core builds its formula on its own schedule, so the tap release does not describe it.
     const core = method === "brew" && installedFormula === "opencode"
@@ -423,6 +425,7 @@ const make = Effect.gen(function* () {
   }
 
   const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {
+    if (channel === "fork") return yield* Effect.fail(new Error(forkUpdateMessage))
     if (!parseReleaseVersion(input)) return yield* Effect.fail(new Error(`Invalid version: ${input}`))
     const version = input.trim().replace(/^v/, "")
     const packageName =
@@ -532,7 +535,11 @@ const make = Effect.gen(function* () {
   })
 
   const inspect = Effect.fnUntraced(function* () {
-    if (OPENCODE_LOCAL || ["1", "true"].includes(process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")) {
+    if (
+      OPENCODE_LOCAL ||
+      channel === "fork" ||
+      ["1", "true"].includes(process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")
+    ) {
       yield* Effect.logInfo("update check skipped", {
         reason: OPENCODE_LOCAL ? "local-install" : "disabled",
         version: OPENCODE_VERSION,
@@ -584,6 +591,7 @@ const make = Effect.gen(function* () {
   })
 
   const check = Effect.fn("cli.updater.check")(function* () {
+    if (channel === "fork") return { type: "unavailable" as const, message: forkUpdateMessage }
     if (OPENCODE_LOCAL)
       return {
         type: "unavailable" as const,
