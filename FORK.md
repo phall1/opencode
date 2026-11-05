@@ -43,6 +43,22 @@ already pinned by the workspace. Replay code has an Oxc complexity ceiling of
   command to reopen it. Explicit `FORK_SYNC_AGENT` overrides remain supported.
 - Pull requests target **this fork**. An upstream PR requires separate explicit
   permission. Never treat maintaining a fork as permission to publish upstream.
+- The opt-in installed `fork` channel is published by `replay-native` only from
+  validated `v2` commits, after acceptance tests and all platform builds succeed.
+  Prereleases are named `fork-<full source commit>` and carry a source manifest,
+  SHA-256 checksums and platform archives. Published releases are not overwritten;
+  incomplete uploads remain drafts and are not install candidates.
+- The companion dotfiles `opencode-fork` launcher and updater install those
+  verified releases alongside upstream OpenCode. The native channel owns
+  `opencode-fork.db`, `service-fork.json`, its own server credential and default
+  port. Provider credentials and the device's OpenTunnel profile remain shared;
+  remote access claims a separate native route. Use `opencode-fork pair --remote`
+  to pair the second server without replacing the first. This is account/channel
+  separation, not a filesystem or process sandbox.
+- Fork binaries refuse upstream upgrades. Fork updates must come through
+  `opencode-fork-update`, retain a rollback build, and defer restarting an active
+  fork server. Existing sessions are not copied between server databases by
+  installation, pairing or updating; transcript transfer is a separate decision.
 - Run experiments through an embedded, isolated host. Do not replace the managed
   background service, install a development binary globally, or attach to real
   phux panes to test replay.
@@ -214,8 +230,10 @@ tests load it by default.
 
 Fork-specific checks use `.github/workflows/replay-native.yml` on ordinary GitHub
 runners, without provider/deployment secrets. Inherited deployment, release,
-triage, and upstream-runner workflows stay disabled in this fork. Publication of
-binaries/packages and deployments remain separate decisions.
+  triage, and upstream-runner workflows stay disabled in this fork. The explicitly
+  enabled fork-channel build/publish jobs live in that same workflow; they do not
+  publish upstream packages, update the upstream installer, or enable deployment
+  secrets. Other binary/package publication and deployments remain separate decisions.
 
 An experiment is ready to expand only when cold replay is complete and strict,
 checkpoint restores are isolated, changed requests reject, and remeasurement
