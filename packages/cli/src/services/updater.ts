@@ -138,6 +138,20 @@ export function decodePolicy(text: string): Policy | undefined {
 }
 
 const make = Effect.gen(function* () {
+  // This channel is installed and rolled back by its own verified artifact manager.
+  // Select that policy once, before any upstream installer discovery or network I/O.
+  if (OPENCODE_CHANNEL === "fork") {
+    const denied = Effect.fail(new Error(forkUpdateMessage))
+    return Service.of({
+      run: () => Effect.succeed(undefined),
+      check: () => Effect.succeed({ type: "unavailable", message: forkUpdateMessage }),
+      apply: () => denied,
+      method: () => Effect.succeed(undefined),
+      latest: () => denied,
+      upgrade: () => denied,
+      removal: () => undefined,
+    })
+  }
   const fs = yield* FileSystem.FileSystem
   const global = yield* Global.Service
   const appProcess = yield* AppProcess.Service
@@ -274,7 +288,6 @@ const make = Effect.gen(function* () {
   }
 
   const release = Effect.fnUntraced(function* (method?: Method) {
-    if (channel === "fork") return yield* Effect.fail(new Error(forkUpdateMessage))
     const distribution = method === "brew" ? "homebrew" : "npm"
     // Homebrew Core builds its formula on its own schedule, so the tap release does not describe it.
     const core = method === "brew" && installedFormula === "opencode"
@@ -425,7 +438,6 @@ const make = Effect.gen(function* () {
   }
 
   const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {
-    if (channel === "fork") return yield* Effect.fail(new Error(forkUpdateMessage))
     if (!parseReleaseVersion(input)) return yield* Effect.fail(new Error(`Invalid version: ${input}`))
     const version = input.trim().replace(/^v/, "")
     const packageName =
@@ -535,11 +547,7 @@ const make = Effect.gen(function* () {
   })
 
   const inspect = Effect.fnUntraced(function* () {
-    if (
-      OPENCODE_LOCAL ||
-      channel === "fork" ||
-      ["1", "true"].includes(process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")
-    ) {
+    if (OPENCODE_LOCAL || ["1", "true"].includes(process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")) {
       yield* Effect.logInfo("update check skipped", {
         reason: OPENCODE_LOCAL ? "local-install" : "disabled",
         version: OPENCODE_VERSION,
@@ -591,7 +599,6 @@ const make = Effect.gen(function* () {
   })
 
   const check = Effect.fn("cli.updater.check")(function* () {
-    if (channel === "fork") return { type: "unavailable" as const, message: forkUpdateMessage }
     if (OPENCODE_LOCAL)
       return {
         type: "unavailable" as const,
