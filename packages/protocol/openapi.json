@@ -16664,6 +16664,9 @@
               "media_blob": {
                 "type": "boolean"
               },
+              "part_rows": {
+                "type": "boolean"
+              },
               "image_generate": {
                 "anyOf": [
                   {
@@ -20182,6 +20185,9 @@
           },
           "protocol": {
             "$ref": "#/components/schemas/Mcp.Protocol"
+          },
+          "pool": {
+            "type": "boolean"
           }
         },
         "required": ["type", "command"],
@@ -20274,6 +20280,9 @@
           },
           "protocol": {
             "$ref": "#/components/schemas/Mcp.Protocol"
+          },
+          "pool": {
+            "type": "boolean"
           }
         },
         "required": ["type", "url"],
