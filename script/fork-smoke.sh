@@ -18,6 +18,7 @@ export OPENCODE_DISABLE_MODELS_FETCH=1 OPENCODE_DISABLE_PROJECT_CONFIG=1
 [[ "$("$binary" --version)" == "opencode v$version" ]]
 [[ "$("$binary" debug paths db)" == "$root/data/opencode/opencode-fork.db" ]]
 "$binary" api get /api/info --standalone > "$root/info.json"
+# shellcheck disable=SC2016 # jq receives its version variable through --arg.
 "$json_tool" -e --arg version "$version" '.version == $version and .pid > 0' "$root/info.json" >/dev/null
 if "$binary" upgrade 2.0.0 --method curl > "$root/upgrade.log" 2>&1; then
   echo 'Fork unexpectedly allowed an upstream upgrade' >&2
