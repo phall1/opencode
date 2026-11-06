@@ -40,3 +40,6 @@ tsconfig.tsbuildinfo
 /replay-artifacts/
 /trace-artifacts/
 trace-v1-*/
+
+# Legal drafts pending review are kept outside the repository; never copy them in.
+legal-drafts-private/
